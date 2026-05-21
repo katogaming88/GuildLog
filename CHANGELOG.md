@@ -8,6 +8,16 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.2.0] — 2026-05-21 — Katorri
+
+### Added
+- "View Log" in the guild pane now opens GuildLog instead of Blizzard's 20-event native log (`CommunitiesGuildLogFrame` hook via `Blizzard_Communities`)
+
+### Fixed
+- Scrollbar crash on open — `UIPanelScrollBarTemplate` in Midnight calls into `SecureScrollTemplates` which requires a scroll-frame parent; replaced with a plain `Slider` widget
+
+---
+
 ## [0.1.0] — 2026-05-21 — Katorri
 
 ### Fixed

@@ -175,6 +175,16 @@ function GuildLog:OnEnable()
         C_GuildInfo.GuildRoster()
     end)
 
+    -- Intercept Blizzard's guild log frame so "View Log" opens our UI instead
+    EventUtil.ContinueOnAddOnLoaded("Blizzard_Communities", function()
+        if CommunitiesGuildLogFrame then
+            CommunitiesGuildLogFrame:HookScript("OnShow", function(self)
+                self:Hide()
+                GuildLogUI_Open()
+            end)
+        end
+    end)
+
     C_GuildInfo.GuildRoster()
 
     -- Wait for the guild channel to be connected before requesting catch-up
