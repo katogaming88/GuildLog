@@ -214,8 +214,13 @@ local function BuildUI()
 
     local listBg = content:CreateTexture(nil, "BACKGROUND")
     listBg:SetColorTexture(0, 0, 0, 0.5)
+<<<<<<< HEAD
     listBg:SetPoint("TOPLEFT",     content, "TOPLEFT",     PAD, listTop)
     listBg:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -24, PAD + 22 + PAD)
+=======
+    listBg:SetPoint("TOPLEFT",  mainFrame, "TOPLEFT",  PAD,  listTop)
+    listBg:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -30, PAD + 22 + PAD)
+>>>>>>> origin/main
 
     for i = 1, VISIBLE do
         local row = CreateFrame("Frame", nil, content)
