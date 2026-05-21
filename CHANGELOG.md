@@ -8,6 +8,16 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.3.0] — 2026-05-21 — Katorri
+
+### Added
+- Window position is now persisted across sessions via AceGUI's `SetStatusTable`; the log reopens where you left it instead of resetting to screen centre.
+
+### Changed
+- UI rebuilt on AceGUI-3.0 `Frame` widget, replacing the custom `BasicFrameTemplateWithInset` window. Entry count moved to the AceGUI status bar. AceGUI-3.0 embedded in `Libs\AceGUI-3.0\`.
+
+---
+
 ## [0.2.2] — 2026-05-21 — Katorri
 
 ### Fixed

@@ -1,5 +1,5 @@
 -- GuildLogUI.lua
--- Scrollable log window with filter buttons and real timestamps
+-- Scrollable log window with filter buttons, built on AceGUI-3.0 Frame
 
 local UI = {}
 GuildLogUI = UI
@@ -7,9 +7,9 @@ GuildLogUI = UI
 -- ── Constants ────────────────────────────────────────────────────────────────
 
 local WINDOW_W   = 620
-local WINDOW_H   = 440
+local WINDOW_H   = 480   -- extra height accommodates AceGUI title/status chrome
 local ROW_H      = 18
-local VISIBLE    = 18   -- rows visible at once
+local VISIBLE    = 18    -- rows visible at once
 local PAD        = 10
 
 -- Colors per event type
@@ -28,6 +28,7 @@ local COLOR_RANK   = "|cffaaaaaa"
 
 -- ── State ────────────────────────────────────────────────────────────────────
 
+local aceFrame    = nil
 local mainFrame   = nil
 local rowFrames   = {}
 local scrollBar   = nil
@@ -107,11 +108,9 @@ function UI.RefreshRows()
     if not mainFrame or not mainFrame:IsShown() then return end
 
     local total = #filteredList
-    -- Clamp offset
     local maxOffset = math.max(0, total - VISIBLE)
     scrollOffset = math.max(0, math.min(scrollOffset, maxOffset))
 
-    -- Update scrollbar
     if scrollBar then
         scrollBar:SetMinMaxValues(0, maxOffset)
         scrollBar:SetValue(scrollOffset)
@@ -123,7 +122,6 @@ function UI.RefreshRows()
         if idx <= total then
             row.text:SetText(BuildRowText(filteredList[idx]))
             row:Show()
-            -- Alternate row backgrounds
             if i % 2 == 0 then
                 row.bg:SetColorTexture(0.08, 0.08, 0.12, 0.4)
             else
@@ -136,9 +134,9 @@ function UI.RefreshRows()
         end
     end
 
-    -- Entry count label
-    if UI.countLabel then
-        UI.countLabel:SetText("Showing " .. total .. " / " .. #(GuildLogDB and GuildLogDB.entries or {}) .. " entries")
+    if aceFrame then
+        local n = #(GuildLogDB and GuildLogDB.entries or {})
+        aceFrame:SetStatusText("Showing " .. total .. " / " .. n .. " entries")
     end
 end
 
@@ -171,32 +169,37 @@ end
 local function BuildUI()
     if mainFrame then return end
 
-    -- Main window
-    mainFrame = CreateFrame("Frame", "GuildLogMainFrame", UIParent, "BasicFrameTemplateWithInset")
-    mainFrame:SetSize(WINDOW_W, WINDOW_H)
-    mainFrame:SetPoint("CENTER")
-    mainFrame:SetMovable(true)
-    mainFrame:EnableMouse(true)
-    mainFrame:RegisterForDrag("LeftButton")
-    mainFrame:SetScript("OnDragStart", mainFrame.StartMoving)
-    mainFrame:SetScript("OnDragStop",  mainFrame.StopMovingOrSizing)
-    mainFrame:SetClampedToScreen(true)
-    mainFrame:Hide()
+    local AceGUI = LibStub("AceGUI-3.0")
 
-    mainFrame.TitleText:SetText("Guild Log")
+    aceFrame = AceGUI:Create("Frame")
+    aceFrame:SetTitle("Guild Log")
+    aceFrame:SetWidth(WINDOW_W)
+    aceFrame:SetHeight(WINDOW_H)
+    aceFrame:EnableResize(false)
+    aceFrame:SetCallback("OnClose", function(widget) widget:Hide() end)
+
+    -- Route position tracking through GuildLogDB so it persists across sessions.
+    -- AceGUI writes top/left into this table on drag-stop and restores from it on open.
+    GuildLogDB.ui = GuildLogDB.ui or {}
+    aceFrame:SetStatusTable(GuildLogDB.ui)
+
+    aceFrame:Hide()
+
+    mainFrame = aceFrame.frame
+    local content = aceFrame.content
 
     -- ── Filter buttons ───────────────────────────────────────────────────────
-    local filterY = -30
-    CreateFilterButton(mainFrame, "Invites",   "INVITE",  PAD,      filterY)
-    CreateFilterButton(mainFrame, "Removals",  "REMOVE",  PAD+78,   filterY)
-    CreateFilterButton(mainFrame, "Leaves",    "LEAVE",   PAD+156,  filterY)
-    CreateFilterButton(mainFrame, "Promotions","PROMOTE", PAD+234,  filterY)
-    CreateFilterButton(mainFrame, "Demotions", "DEMOTE",  PAD+312,  filterY)
+    local filterY = -PAD
+    CreateFilterButton(content, "Invites",    "INVITE",  PAD,      filterY)
+    CreateFilterButton(content, "Removals",   "REMOVE",  PAD+78,   filterY)
+    CreateFilterButton(content, "Leaves",     "LEAVE",   PAD+156,  filterY)
+    CreateFilterButton(content, "Promotions", "PROMOTE", PAD+234,  filterY)
+    CreateFilterButton(content, "Demotions",  "DEMOTE",  PAD+312,  filterY)
 
     -- ── Search box ───────────────────────────────────────────────────────────
-    local searchBox = CreateFrame("EditBox", "GuildLogSearch", mainFrame, "SearchBoxTemplate")
+    local searchBox = CreateFrame("EditBox", "GuildLogSearch", content, "SearchBoxTemplate")
     searchBox:SetSize(140, 20)
-    searchBox:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -30, filterY - 2)
+    searchBox:SetPoint("TOPRIGHT", content, "TOPRIGHT", -10, -PAD-2)
     searchBox:SetAutoFocus(false)
     searchBox:SetScript("OnTextChanged", function(self)
         searchText = self:GetText()
@@ -206,31 +209,25 @@ local function BuildUI()
         self:ClearFocus()
     end)
 
-    -- ── Entry count label ────────────────────────────────────────────────────
-    UI.countLabel = mainFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    UI.countLabel:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -30, filterY - 28)
-    UI.countLabel:SetTextColor(0.5, 0.5, 0.5)
-
     -- ── Scroll area ──────────────────────────────────────────────────────────
-    local listTop = -62
+    local listTop = -(PAD + 22 + PAD)  -- below filter buttons
 
-    local listBg = mainFrame:CreateTexture(nil, "BACKGROUND")
+    local listBg = content:CreateTexture(nil, "BACKGROUND")
     listBg:SetColorTexture(0, 0, 0, 0.5)
-    listBg:SetPoint("TOPLEFT",  mainFrame, "TOPLEFT",  PAD,  listTop)
-    listBg:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -30, PAD + 22 + PAD)
+    listBg:SetPoint("TOPLEFT",     content, "TOPLEFT",     PAD, listTop)
+    listBg:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -24, PAD + 22 + PAD)
 
-    -- Rows
     for i = 1, VISIBLE do
-        local row = CreateFrame("Frame", nil, mainFrame)
+        local row = CreateFrame("Frame", nil, content)
         row:SetHeight(ROW_H)
-        row:SetPoint("TOPLEFT",  mainFrame, "TOPLEFT",  PAD, listTop - (i - 1) * ROW_H)
-        row:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -30, listTop - (i - 1) * ROW_H)
+        row:SetPoint("TOPLEFT",  content, "TOPLEFT",  PAD, listTop - (i-1)*ROW_H)
+        row:SetPoint("TOPRIGHT", content, "TOPRIGHT", -24, listTop - (i-1)*ROW_H)
 
         row.bg = row:CreateTexture(nil, "BACKGROUND")
         row.bg:SetAllPoints()
 
         row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.text:SetPoint("LEFT", row, "LEFT", 4, 0)
+        row.text:SetPoint("LEFT",  row, "LEFT",  4, 0)
         row.text:SetPoint("RIGHT", row, "RIGHT", -4, 0)
         row.text:SetJustifyH("LEFT")
         row.text:SetWordWrap(false)
@@ -238,11 +235,11 @@ local function BuildUI()
         rowFrames[i] = row
     end
 
-    -- plain Slider: UIPanelScrollBarTemplate now requires a scroll-frame parent (TWW SecureScrollTemplates)
-    scrollBar = CreateFrame("Slider", "GuildLogScrollBar", mainFrame)
+    -- ── Scrollbar ────────────────────────────────────────────────────────────
+    scrollBar = CreateFrame("Slider", "GuildLogScrollBar", content)
     scrollBar:SetWidth(16)
-    scrollBar:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -8, listTop - 16)
-    scrollBar:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -8, PAD + 20)
+    scrollBar:SetPoint("TOPRIGHT",    content, "TOPRIGHT",    -4, listTop)
+    scrollBar:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -4, PAD + 22 + PAD)
     scrollBar:SetOrientation("VERTICAL")
     scrollBar:SetMinMaxValues(0, 0)
     scrollBar:SetValueStep(1)
@@ -256,7 +253,6 @@ local function BuildUI()
         UI.RefreshRows()
     end)
 
-    -- Mouse wheel scrolling
     mainFrame:EnableMouseWheel(true)
     mainFrame:SetScript("OnMouseWheel", function(_, delta)
         local cur = scrollBar:GetValue()
@@ -264,10 +260,10 @@ local function BuildUI()
         scrollBar:SetValue(math.max(mn, math.min(mx, cur - delta * 3)))
     end)
 
-    -- ── Bottom bar ───────────────────────────────────────────────────────────
-    local clearBtn = CreateFrame("Button", nil, mainFrame, "UIPanelButtonTemplate")
+    -- ── Bottom buttons ───────────────────────────────────────────────────────
+    local clearBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
     clearBtn:SetSize(80, 22)
-    clearBtn:SetPoint("BOTTOMLEFT", mainFrame, "BOTTOMLEFT", PAD, PAD)
+    clearBtn:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", PAD, PAD)
     clearBtn:SetText("Clear Log")
     clearBtn:SetScript("OnClick", function()
         StaticPopupDialogs["GUILDLOG_CONFIRM_CLEAR"] = {
@@ -279,22 +275,23 @@ local function BuildUI()
                 RebuildList()
                 print("|cff00ccff[GuildLog]|r Log cleared.")
             end,
-            timeout   = 0,
-            whileDead = false,
+            timeout      = 0,
+            whileDead    = false,
             hideOnEscape = true,
         }
         StaticPopup_Show("GUILDLOG_CONFIRM_CLEAR")
     end)
 
-    local refreshBtn = CreateFrame("Button", nil, mainFrame, "UIPanelButtonTemplate")
+    local refreshBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
     refreshBtn:SetSize(80, 22)
-    refreshBtn:SetPoint("BOTTOMLEFT", mainFrame, "BOTTOMLEFT", PAD + 86, PAD)
+    refreshBtn:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", PAD+86, PAD)
     refreshBtn:SetText("Refresh")
     refreshBtn:SetScript("OnClick", function()
         RebuildList()
     end)
 
-    -- Close with Escape
+    -- Register with UISpecialFrames so Escape closes the window
+    _G["GuildLogMainFrame"] = mainFrame
     table.insert(UISpecialFrames, "GuildLogMainFrame")
 end
 
@@ -303,7 +300,7 @@ end
 function GuildLogUI_Open()
     BuildUI()
     RebuildList()
-    mainFrame:Show()
+    aceFrame:Show()
 end
 
 -- Called by GuildLog.lua when a new entry arrives while window is open
