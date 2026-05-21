@@ -176,7 +176,7 @@ local function BuildUI()
     mainFrame:SetSize(WINDOW_W, WINDOW_H)
     local pos = GuildLogDB and GuildLogDB.windowPos
     if pos then
-        mainFrame:SetPoint(pos.point, UIParent, pos.relativePoint, pos.x, pos.y)
+        mainFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", pos.x, pos.y)
     else
         mainFrame:SetPoint("CENTER")
     end
@@ -186,8 +186,7 @@ local function BuildUI()
     mainFrame:SetScript("OnDragStart", mainFrame.StartMoving)
     mainFrame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
-        local point, _, relativePoint, x, y = self:GetPoint(1)
-        GuildLogDB.windowPos = { point = point, relativePoint = relativePoint, x = x, y = y }
+        GuildLogDB.windowPos = { x = self:GetLeft(), y = self:GetTop() }
     end)
     mainFrame:SetClampedToScreen(true)
     mainFrame:Hide()
