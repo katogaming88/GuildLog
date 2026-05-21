@@ -118,10 +118,19 @@ local function ScanGuildLog()
     if total == 0 then return end
     local now = time()
     for i = total, 1, -1 do
-        local eventType, player1, player2, rankName, eventDate = GetGuildEventInfo(i)
+        local eventType, player1, player2, rankName, year, month, day, hour = GetGuildEventInfo(i)
         local ourType = eventType and BLIZZARD_TO_EVENT[eventType]
         if ourType then
-            local approxTime = now - math.floor(eventDate or 0)
+            -- GetGuildEventInfo returns offsets: years/months/days/hours ago.
+            -- Subtract them from today's date using date("*t") so calendar arithmetic is correct.
+            local d = date("*t", now)
+            d.year  = d.year  - (year  or 0)
+            d.month = d.month - (month or 0)
+            d.day   = d.day   - (day   or 0)
+            d.hour  = d.hour  - (hour  or 0)
+            d.min   = 0
+            d.sec   = 0
+            local approxTime = time(d)
             if not IsDuplicate(ourType, player1, player2, approxTime) then
                 local rank, newRank
                 if ourType == EVENT_PROMOTE or ourType == EVENT_DEMOTE then

@@ -96,6 +96,8 @@ local function RebuildList()
         end
     end
 
+    table.sort(filteredList, function(a, b) return a.timestamp > b.timestamp end)
+
     scrollOffset = 0
     UI.RefreshRows()
 end
