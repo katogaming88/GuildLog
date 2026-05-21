@@ -8,6 +8,14 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.3.1] — 2026-05-21 — Katorri
+
+### Fixed
+- Quoted `on:` key in both workflow files to prevent YAML 1.1 boolean coercion (`on` -> `true`) from failing strict validators.
+- Updated `actions/checkout` from non-existent v6 to v4 in both workflows.
+
+---
+
 ## [0.3.0] — 2026-05-21 — Katorri
 
 ### Added

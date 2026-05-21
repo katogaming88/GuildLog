@@ -1,6 +1,6 @@
 name: Release
 
-on:
+"on":
   push:
     tags:
       - "v*.*.*"
@@ -12,7 +12,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Read version from tag
         id: version
