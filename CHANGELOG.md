@@ -8,6 +8,13 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.3.0] — 2026-05-21 — Katorri
+
+### Added
+- Window position is now persisted across sessions; the log reopens where you left it instead of resetting to screen centre.
+
+---
+
 ## [0.2.1] — 2026-05-21 — Katorri
 
 ### Fixed

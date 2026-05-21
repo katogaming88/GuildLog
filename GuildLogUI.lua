@@ -174,12 +174,21 @@ local function BuildUI()
     -- Main window
     mainFrame = CreateFrame("Frame", "GuildLogMainFrame", UIParent, "BasicFrameTemplateWithInset")
     mainFrame:SetSize(WINDOW_W, WINDOW_H)
-    mainFrame:SetPoint("CENTER")
+    local pos = GuildLogDB and GuildLogDB.windowPos
+    if pos then
+        mainFrame:SetPoint(pos.point, UIParent, pos.relativePoint, pos.x, pos.y)
+    else
+        mainFrame:SetPoint("CENTER")
+    end
     mainFrame:SetMovable(true)
     mainFrame:EnableMouse(true)
     mainFrame:RegisterForDrag("LeftButton")
     mainFrame:SetScript("OnDragStart", mainFrame.StartMoving)
-    mainFrame:SetScript("OnDragStop",  mainFrame.StopMovingOrSizing)
+    mainFrame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, relativePoint, x, y = self:GetPoint(1)
+        GuildLogDB.windowPos = { point = point, relativePoint = relativePoint, x = x, y = y }
+    end)
     mainFrame:SetClampedToScreen(true)
     mainFrame:Hide()
 
