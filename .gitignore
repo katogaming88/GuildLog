@@ -12,3 +12,6 @@ Thumbs.db
 .idea/
 *.sublime-project
 *.sublime-workspace
+
+# Claude Code local settings (machine-specific paths)
+.claude/settings.local.json
