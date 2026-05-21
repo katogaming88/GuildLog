@@ -17,12 +17,19 @@ globals = {
     "GuildLogScrollBar",
     "GuildLogSearch",
 
+    -- Ace3 / LibStub
+    "LibStub",
+
     -- WoW UI API
     "CreateFrame",
+    "UnitName",
     "UIParent",
     "UISpecialFrames",
     "StaticPopupDialogs",
     "StaticPopup_Show",
+
+    -- WoW timer API
+    "C_Timer",
 
     -- WoW guild API
     "GetNumGuildEvents",

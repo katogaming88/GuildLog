@@ -198,7 +198,7 @@ function GuildLog:SendSyncRequest()
     self:SendCommMessage(COMM_PREFIX, payload, "GUILD")
 end
 
-function GuildLog:OnCommReceived(prefix, payload, distribution, sender)
+function GuildLog:OnCommReceived(_prefix, payload, _distribution, sender)
     if sender == UnitName("player") then return end
     local ok, data = AceSerializer:Deserialize(payload)
     if not ok or type(data) ~= "table" then return end

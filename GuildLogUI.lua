@@ -29,7 +29,6 @@ local COLOR_RANK   = "|cffaaaaaa"
 -- ── State ────────────────────────────────────────────────────────────────────
 
 local mainFrame   = nil
-local scrollFrame = nil
 local rowFrames   = {}
 local scrollBar   = nil
 
@@ -214,7 +213,6 @@ local function BuildUI()
 
     -- ── Scroll area ──────────────────────────────────────────────────────────
     local listTop = -62
-    local listH   = VISIBLE * ROW_H
 
     local listBg = mainFrame:CreateTexture(nil, "BACKGROUND")
     listBg:SetColorTexture(0, 0, 0, 0.5)
@@ -247,14 +245,14 @@ local function BuildUI()
     scrollBar:SetMinMaxValues(0, 0)
     scrollBar:SetValueStep(1)
     scrollBar:SetValue(0)
-    scrollBar:SetScript("OnValueChanged", function(self, val)
+    scrollBar:SetScript("OnValueChanged", function(_, val)
         scrollOffset = math.floor(val + 0.5)
         UI.RefreshRows()
     end)
 
     -- Mouse wheel scrolling
     mainFrame:EnableMouseWheel(true)
-    mainFrame:SetScript("OnMouseWheel", function(self, delta)
+    mainFrame:SetScript("OnMouseWheel", function(_, delta)
         local cur = scrollBar:GetValue()
         local mn, mx = scrollBar:GetMinMaxValues()
         scrollBar:SetValue(math.max(mn, math.min(mx, cur - delta * 3)))
@@ -303,7 +301,7 @@ function GuildLogUI_Open()
 end
 
 -- Called by GuildLog.lua when a new entry arrives while window is open
-GuildLog.OnNewEntry = function(entry)
+GuildLog.OnNewEntry = function(_)
     if mainFrame and mainFrame:IsShown() then
         RebuildList()
     end
