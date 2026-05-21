@@ -8,6 +8,13 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.2.1] — 2026-05-21 — Katorri
+
+### Fixed
+- Promote/demote rows displayed □ block characters instead of an arrow between the target name and new rank — WoW's built-in font doesn't include U+2192 (→); replaced with ASCII `->`.
+
+---
+
 ## [0.2.0] — 2026-05-21 — Katorri
 
 ### Added
