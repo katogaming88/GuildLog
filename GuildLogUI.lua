@@ -238,13 +238,19 @@ local function BuildUI()
         rowFrames[i] = row
     end
 
-    -- Scrollbar
-    scrollBar = CreateFrame("Slider", "GuildLogScrollBar", mainFrame, "UIPanelScrollBarTemplate")
+    -- plain Slider: UIPanelScrollBarTemplate now requires a scroll-frame parent (TWW SecureScrollTemplates)
+    scrollBar = CreateFrame("Slider", "GuildLogScrollBar", mainFrame)
+    scrollBar:SetWidth(16)
     scrollBar:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -8, listTop - 16)
     scrollBar:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -8, PAD + 20)
+    scrollBar:SetOrientation("VERTICAL")
     scrollBar:SetMinMaxValues(0, 0)
     scrollBar:SetValueStep(1)
     scrollBar:SetValue(0)
+    local thumb = scrollBar:CreateTexture(nil, "ARTWORK")
+    thumb:SetTexture("Interface\\Buttons\\UI-SliderBar-Button-Vertical")
+    thumb:SetSize(16, 32)
+    scrollBar:SetThumbTexture(thumb)
     scrollBar:SetScript("OnValueChanged", function(_, val)
         scrollOffset = math.floor(val + 0.5)
         UI.RefreshRows()

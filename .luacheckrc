@@ -36,6 +36,15 @@ globals = {
     "GetGuildEventInfo",
     "GuildRequestMemberInfo",
     "C_GuildInfo",
+    "C_Timer",
+    "UnitName",
+
+    -- WoW Communities / guild pane
+    "EventUtil",
+    "CommunitiesGuildLogFrame",
+
+    -- Ace3 / LibStub
+    "LibStub",
 
     -- WoW slash command system
     "SlashCmdList",
