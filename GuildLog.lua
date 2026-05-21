@@ -178,8 +178,8 @@ function GuildLog:OnEnable()
     -- Intercept Blizzard's guild log frame so "View Log" opens our UI instead
     EventUtil.ContinueOnAddOnLoaded("Blizzard_Communities", function()
         if CommunitiesGuildLogFrame then
-            CommunitiesGuildLogFrame:HookScript("OnShow", function(self)
-                self:Hide()
+            CommunitiesGuildLogFrame:HookScript("OnShow", function(frame)
+                frame:Hide()
                 GuildLogUI_Open()
             end)
         end
