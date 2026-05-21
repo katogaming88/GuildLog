@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Force LF for YAML - CRLF causes yaml-language-server parse errors
+*.yml text eol=lf
+*.yaml text eol=lf
