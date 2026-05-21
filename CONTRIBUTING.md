@@ -45,6 +45,63 @@ The PR template will prompt you for everything required. Short version:
 - If completing a roadmap item, remove or update that entry in `ROADMAP.md`
 - Pass all items on the manual testing checklist in the PR template
 
+### Branch naming
+
+Branches must follow the same type vocabulary as PR titles:
+
+```
+<type>/<short-description>
+```
+
+- Lowercase kebab-case description
+- Keep it short — 2–4 words is enough
+- Branch directly off `main`; PR back to `main`
+
+**Examples:**
+```
+feat/date-range-filter
+fix/timestamp-reading
+docs/contributing-rules
+chore/toc-bump-12-1-0
+refactor/extract-row-builder
+```
+
+---
+
+### PR title format
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
+
+```
+<type>: <short description>
+```
+
+| Type | When to use | Version bump |
+|---|---|---|
+| `feat` | New user-visible feature | `MINOR` |
+| `fix` | Bug fix | `PATCH` |
+| `docs` | Docs only (CHANGELOG, CONTRIBUTING, comments) | — |
+| `chore` | Maintenance with no behaviour change (TOC bump, dependency update) | — |
+| `refactor` | Code restructure, no behaviour change | — |
+| `perf` | Performance improvement | — |
+
+Append `!` for breaking changes → `MAJOR` bump:
+
+```
+feat!: restructure GuildLogDB schema for multi-guild support
+```
+
+**Rules:** imperative mood ("add filter", not "added filter") · under 72 characters · no trailing period.
+
+**Examples:**
+```
+feat: add date range filter to guild log UI
+fix: timestamps reading wrong date from Blizzard guild log
+docs: add PR naming rules to CONTRIBUTING
+chore: bump TOC to WoW 12.1.0
+refactor: extract row builder into its own module
+```
+
 ---
 
 ## Versioning
