@@ -9,7 +9,7 @@ GuildLogUI = UI
 local WINDOW_W   = 620
 local WINDOW_H   = 440
 local ROW_H      = 18
-local VISIBLE    = 20   -- rows visible at once
+local VISIBLE    = 18   -- rows visible at once
 local PAD        = 10
 
 -- Colors per event type
@@ -217,7 +217,7 @@ local function BuildUI()
     local listBg = mainFrame:CreateTexture(nil, "BACKGROUND")
     listBg:SetColorTexture(0, 0, 0, 0.5)
     listBg:SetPoint("TOPLEFT",  mainFrame, "TOPLEFT",  PAD,  listTop)
-    listBg:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -30, PAD + 4)
+    listBg:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -30, PAD + 22 + PAD)
 
     -- Rows
     for i = 1, VISIBLE do
