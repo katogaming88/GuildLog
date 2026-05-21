@@ -1,0 +1,9 @@
+## Interface: 120005
+## Title: GuildLog
+## Notes: A clean guild event log with real timestamps and full actor names
+## Author: You
+## Version: 0.0.1
+## SavedVariables: GuildLogDB
+
+GuildLog.lua
+GuildLogUI.lua
