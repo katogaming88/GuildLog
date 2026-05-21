@@ -8,6 +8,13 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.2.2] — 2026-05-21 — Katorri
+
+### Fixed
+- Log entries overlapped the Clear Log / Refresh buttons at the bottom of the window — reduced visible row count from 20 to 18 and raised the list background to stop above the button bar.
+
+---
+
 ## [0.2.1] — 2026-05-21 — Katorri
 
 ### Fixed
