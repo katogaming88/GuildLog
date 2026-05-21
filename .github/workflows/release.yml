@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from tag
+        id: version
+        run: echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Build addon zip
+        run: |
+          mkdir -p dist
+          zip -r dist/GuildLog-${{ steps.version.outputs.tag }}.zip \
+            GuildLog.toc \
+            GuildLog.lua \
+            GuildLogUI.lua \
+            README.md \
+            CHANGELOG.md \
+            LICENSE
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: GuildLog ${{ steps.version.outputs.tag }}
+          body_path: CHANGELOG.md
+          files: dist/GuildLog-${{ steps.version.outputs.tag }}.zip

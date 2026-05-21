@@ -270,7 +270,6 @@ local function BuildUI()
             button2   = "Cancel",
             OnAccept  = function()
                 GuildLogDB.entries = {}
-                GuildLog.ResetScanCount()
                 RebuildList()
                 print("|cff00ccff[GuildLog]|r Log cleared.")
             end,

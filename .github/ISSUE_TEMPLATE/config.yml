@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: WoW AddOn API reference
+    url: https://warcraft.wiki.gg/wiki/World_of_Warcraft_API
+    about: Blizzard's Lua API documentation
