@@ -6,6 +6,10 @@ Planned and considered improvements, roughly in priority order. Nothing here is 
 
 ## Near-term
 
+### Rank-colored actor names
+- Color the actor's name in each log row by their guild rank, making it easy to see at a glance which rank sent an invite, kicked someone, or performed a promotion/demotion
+- Rank color data from `GuildControlGetRankColor` or the roster at event time
+
 ### Export / copy
 - Copy visible log (or full log) to clipboard as plain text or CSV
 - Useful for pasting into a spreadsheet or Discord
