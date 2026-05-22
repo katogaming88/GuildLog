@@ -28,8 +28,8 @@ GuildLog.EVENT_LABELS = EVENT_LABELS
 
 local BLIZZARD_TO_EVENT = {
     invite  = EVENT_INVITE,
-    kick    = EVENT_REMOVE,
-    leave   = EVENT_LEAVE,
+    remove  = EVENT_REMOVE,
+    quit    = EVENT_LEAVE,
     promote = EVENT_PROMOTE,
     demote  = EVENT_DEMOTE,
 }
