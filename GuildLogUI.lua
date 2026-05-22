@@ -61,7 +61,7 @@ local function BuildRowText(entry)
     elseif entry.type == "REMOVE" then
         msg = (actor or "?") .. color .. " kicked " .. COLOR_RESET .. (target or "?")
     elseif entry.type == "LEAVE" then
-        msg = (target or "?") .. color .. " left the guild" .. COLOR_RESET
+        msg = (actor or "?") .. color .. " left the guild" .. COLOR_RESET
     elseif entry.type == "PROMOTE" then
         local rank = entry.newRank ~= "" and (COLOR_RANK .. " -> " .. entry.newRank .. COLOR_RESET) or ""
         msg = (actor or "?") .. color .. " promoted " .. COLOR_RESET .. (target or "?") .. rank

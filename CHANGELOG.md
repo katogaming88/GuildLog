@@ -8,6 +8,14 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.3.2] — 2026-05-22 — Katorri
+
+### Fixed
+- Voluntary guild leaves were never recorded — `GetGuildEventInfo` returns `"quit"` for leaves and `"remove"` for kicks, but the event map used `"leave"` and `"kick"` respectively, so both event types were silently dropped. Corrected both keys.
+- Leave rows displayed `?` instead of the player name — the UI read `entry.target` for leave events but the departing player is stored in `entry.actor` (`player1` from `GetGuildEventInfo`). Fixed to read `actor`.
+
+---
+
 ## [0.3.1] — 2026-05-21 — Katorri
 
 ### Fixed
