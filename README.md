@@ -1,11 +1,9 @@
 # GuildLog
 
-[![Version](https://img.shields.io/badge/version-0.0.1-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.2-blue)](CHANGELOG.md)
 [![WoW Interface](https://img.shields.io/badge/WoW-12.0.5_%7C_120005-orange)](https://warcraft.wiki.gg/wiki/Patch_12.0.5)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Lint](https://github.com/YOUR_USERNAME/GuildLog/actions/workflows/lint.yml/badge.svg)](https://github.com/YOUR_USERNAME/GuildLog/actions/workflows/lint.yml)
-
-> Replace `YOUR_USERNAME` in the Lint badge URL above once the repo is created.
+[![Lint](https://github.com/katogaming88/GuildLog/actions/workflows/lint.yml/badge.svg)](https://github.com/katogaming88/GuildLog/actions/workflows/lint.yml)
 
 A lightweight World of Warcraft addon that captures and displays guild events with **real timestamps** (not "3 days ago") and **full actor names**.
 
@@ -18,6 +16,9 @@ A lightweight World of Warcraft addon that captures and displays guild events wi
 - Filter by event type (Invites / Removals / Leaves / Promotions / Demotions)
 - Search by player name
 - Unlimited history by default (configurable via `GuildLog.MAX_ENTRIES`)
+- Cross-client sync — on login, automatically catches up missed events from other online members who have the addon
+- Replaces Blizzard's native "View Log" panel: clicking it opens GuildLog instead
+- Window position persists across sessions
 - Zero rank management — purely a log viewer
 
 ## Installation
