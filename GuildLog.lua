@@ -162,11 +162,9 @@ local function ScanGuildLog()
             -- and one "invite" with player2=nil (the acceptance notification).  The join
             -- itself is captured via the separate "join" event type; skip the empty-target
             -- invite to avoid an "(unknown)" duplicate.
-            if ourType == EVENT_INVITE and (player2 == nil or player2 == "") then
-                -- luacheck: ignore (intentional no-op)
-            elseif ourType == EVENT_LEAVE and (player1 == nil or player1 == "") then
-                -- luacheck: ignore (intentional no-op)
-            else
+            local skip = (ourType == EVENT_INVITE and (player2 == nil or player2 == ""))
+                      or (ourType == EVENT_LEAVE  and (player1 == nil or player1 == ""))
+            if not skip then
                 -- GetGuildEventInfo returns offsets: years/months/days/hours ago.
                 -- Subtract them from today's date using date("*t") so calendar arithmetic is correct.
                 local d = date("*t", now)
@@ -211,12 +209,9 @@ local function PurgeExistingDuplicates()
     local kept   = {}
     local byKey  = {}  -- "type\1actor\1target" -> list of kept timestamps
     for _, e in ipairs(entries) do
-        -- Drop spurious empty-actor LEAVE entries and empty-target INVITE entries.
-        if e.type == "LEAVE" and (e.actor == nil or e.actor == "") then
-            -- intentionally skipped
-        elseif e.type == "INVITE" and (e.target == nil or e.target == "") then
-            -- intentionally skipped
-        else
+        local skip = (e.type == "LEAVE"  and (e.actor  == nil or e.actor  == ""))
+                  or (e.type == "INVITE" and (e.target == nil or e.target == ""))
+        if not skip then
             local key   = (e.type or "") .. "\1" .. (e.actor or "") .. "\1" .. (e.target or "")
             local times = byKey[key]
             local isDup = false
