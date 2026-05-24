@@ -12,6 +12,7 @@ local SYNC_DELAY  = 5           -- seconds after login before requesting catch-u
 -- ── Event type constants ──────────────────────────────────────────────────────
 
 local EVENT_INVITE  = "INVITE"
+local EVENT_JOIN    = "JOIN"
 local EVENT_REMOVE  = "REMOVE"
 local EVENT_LEAVE   = "LEAVE"
 local EVENT_PROMOTE = "PROMOTE"
@@ -19,6 +20,7 @@ local EVENT_DEMOTE  = "DEMOTE"
 
 local EVENT_LABELS = {
     [EVENT_INVITE]  = "Invited",
+    [EVENT_JOIN]    = "Joined",
     [EVENT_REMOVE]  = "Removed",
     [EVENT_LEAVE]   = "Left",
     [EVENT_PROMOTE] = "Promoted",
@@ -28,6 +30,7 @@ GuildLog.EVENT_LABELS = EVENT_LABELS
 
 local BLIZZARD_TO_EVENT = {
     invite  = EVENT_INVITE,
+    join    = EVENT_JOIN,
     remove  = EVENT_REMOVE,
     quit    = EVENT_LEAVE,
     promote = EVENT_PROMOTE,
@@ -126,33 +129,43 @@ local function ScanGuildLog()
         local eventType, player1, player2, rankName, year, month, day, hour = GetGuildEventInfo(i)
         local ourType = eventType and BLIZZARD_TO_EVENT[eventType]
         if ourType then
-            -- GetGuildEventInfo returns offsets: years/months/days/hours ago.
-            -- Subtract them from today's date using date("*t") so calendar arithmetic is correct.
-            local d = date("*t", now)
-            d.year  = d.year  - (year  or 0)
-            d.month = d.month - (month or 0)
-            d.day   = d.day   - (day   or 0)
-            d.hour  = d.hour  - (hour  or 0)
-            d.min   = 0
-            d.sec   = 0
-            local approxTime = time(d)
-            if not IsDuplicate(ourType, player1, player2, approxTime) then
-                local rank, newRank
-                if ourType == EVENT_PROMOTE or ourType == EVENT_DEMOTE then
-                    newRank = rankName
-                else
-                    rank = rankName
+            -- WoW logs two entries per invite+accept: one "invite" with player2=invitee
+            -- and one "invite" with player2=nil (the acceptance notification).  The join
+            -- itself is captured via the separate "join" event type; skip the empty-target
+            -- invite to avoid an "(unknown)" duplicate.
+            if ourType == EVENT_INVITE and (player2 == nil or player2 == "") then
+                -- luacheck: ignore (intentional no-op)
+            else
+                -- GetGuildEventInfo returns offsets: years/months/days/hours ago.
+                -- Subtract them from today's date using date("*t") so calendar arithmetic is correct.
+                local d = date("*t", now)
+                d.year  = d.year  - (year  or 0)
+                d.month = d.month - (month or 0)
+                d.day   = d.day   - (day   or 0)
+                d.hour  = d.hour  - (hour  or 0)
+                d.min   = 0
+                d.sec   = 0
+                local approxTime = time(d)
+                if not IsDuplicate(ourType, player1, player2, approxTime) then
+                    local rank, newRank
+                    if ourType == EVENT_PROMOTE or ourType == EVENT_DEMOTE then
+                        newRank = rankName
+                    else
+                        rank = rankName
+                    end
+                    AddEntry(ourType, player1, player2, rank, newRank, approxTime)
                 end
-                AddEntry(ourType, player1, player2, rank, newRank, approxTime)
             end
         end
     end
 end
 
 -- ── Startup dedup cleanup ─────────────────────────────────────────────────────
--- Removes duplicate entries that accumulated before the 7200-second dedup window
--- was introduced.  Groups by (type, actor, target); within each group, drops any
--- entry whose timestamp is within 3600 seconds of an already-kept entry.
+-- 1. Drops INVITE entries with an empty target -- these are the spurious join
+--    notifications WoW logs alongside the real invite; proper "join" events are
+--    now captured via the EVENT_JOIN type instead.
+-- 2. Removes time-based duplicates (same type/actor/target within 3600 s) that
+--    accumulated before the 7200-second IsDuplicate window was introduced.
 -- Safe to run every load -- idempotent once the log is clean.
 
 local function PurgeExistingDuplicates()
@@ -165,22 +178,27 @@ local function PurgeExistingDuplicates()
     local kept   = {}
     local byKey  = {}  -- "type\1actor\1target" -> list of kept timestamps
     for _, e in ipairs(entries) do
-        local key   = (e.type or "") .. "\1" .. (e.actor or "") .. "\1" .. (e.target or "")
-        local times = byKey[key]
-        local isDup = false
-        if times then
-            for _, t in ipairs(times) do
-                if math.abs(t - e.timestamp) <= 3600 then
-                    isDup = true
-                    break
+        -- Drop old spurious empty-target INVITE entries (join notifications).
+        if e.type == "INVITE" and (e.target == nil or e.target == "") then
+            -- intentionally skipped
+        else
+            local key   = (e.type or "") .. "\1" .. (e.actor or "") .. "\1" .. (e.target or "")
+            local times = byKey[key]
+            local isDup = false
+            if times then
+                for _, t in ipairs(times) do
+                    if math.abs(t - e.timestamp) <= 3600 then
+                        isDup = true
+                        break
+                    end
                 end
             end
-        end
-        if not isDup then
-            kept[#kept + 1] = e
-            if not byKey[key] then byKey[key] = {} end
-            local ts = byKey[key]
-            ts[#ts + 1] = e.timestamp
+            if not isDup then
+                kept[#kept + 1] = e
+                if not byKey[key] then byKey[key] = {} end
+                local ts = byKey[key]
+                ts[#ts + 1] = e.timestamp
+            end
         end
     end
 
