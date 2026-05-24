@@ -15,6 +15,7 @@ local PAD        = 10
 -- Colors per event type
 local TYPE_COLORS = {
     INVITE  = "|cff00cc44",   -- green
+    JOIN    = "|cff44ff88",   -- lighter green
     REMOVE  = "|cffcc2222",   -- red
     LEAVE   = "|cffff8800",   -- orange
     PROMOTE = "|cff88ccff",   -- sky blue
@@ -35,6 +36,7 @@ local scrollBar   = nil
 
 local activeFilters = {
     INVITE  = true,
+    JOIN    = true,
     REMOVE  = true,
     LEAVE   = true,
     PROMOTE = true,
@@ -57,17 +59,19 @@ local function BuildRowText(entry)
 
     local msg
     if entry.type == "INVITE" then
-        msg = (actor or "?") .. color .. " invited " .. COLOR_RESET .. (target or "?")
+        msg = (actor or "(unknown)") .. color .. " invited " .. COLOR_RESET .. (target or "(unknown)")
+    elseif entry.type == "JOIN" then
+        msg = (actor or "(unknown)") .. color .. " joined the guild" .. COLOR_RESET
     elseif entry.type == "REMOVE" then
-        msg = (actor or "?") .. color .. " kicked " .. COLOR_RESET .. (target or "?")
+        msg = (actor or "(unknown)") .. color .. " kicked " .. COLOR_RESET .. (target or "(unknown)")
     elseif entry.type == "LEAVE" then
-        msg = (actor or "?") .. color .. " left the guild" .. COLOR_RESET
+        msg = (actor or "(unknown)") .. color .. " left the guild" .. COLOR_RESET
     elseif entry.type == "PROMOTE" then
         local rank = entry.newRank ~= "" and (COLOR_RANK .. " -> " .. entry.newRank .. COLOR_RESET) or ""
-        msg = (actor or "?") .. color .. " promoted " .. COLOR_RESET .. (target or "?") .. rank
+        msg = (actor or "(unknown)") .. color .. " promoted " .. COLOR_RESET .. (target or "(unknown)") .. rank
     elseif entry.type == "DEMOTE" then
         local rank = entry.newRank ~= "" and (COLOR_RANK .. " -> " .. entry.newRank .. COLOR_RESET) or ""
-        msg = (actor or "?") .. color .. " demoted " .. COLOR_RESET .. (target or "?") .. rank
+        msg = (actor or "(unknown)") .. color .. " demoted " .. COLOR_RESET .. (target or "(unknown)") .. rank
     else
         msg = color .. label .. COLOR_RESET .. " " .. (target or "")
     end
@@ -142,22 +146,24 @@ end
 
 -- ── Main frame construction ───────────────────────────────────────────────────
 
-local function CreateFilterButton(parent, label, eventType, x, y)
+-- eventTypes may be a single string or an array of strings.
+-- All types in the array toggle together; appearance tracks the first.
+local function CreateFilterButton(parent, label, eventTypes, x, y)
+    local types = type(eventTypes) == "table" and eventTypes or { eventTypes }
     local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     btn:SetSize(72, 22)
     btn:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     btn:SetText(label)
 
     local function UpdateAppearance()
-        if activeFilters[eventType] then
-            btn:SetAlpha(1.0)
-        else
-            btn:SetAlpha(0.35)
-        end
+        btn:SetAlpha(activeFilters[types[1]] and 1.0 or 0.35)
     end
 
     btn:SetScript("OnClick", function()
-        activeFilters[eventType] = not activeFilters[eventType]
+        local newVal = not activeFilters[types[1]]
+        for _, t in ipairs(types) do
+            activeFilters[t] = newVal
+        end
         UpdateAppearance()
         RebuildList()
     end)
@@ -190,7 +196,7 @@ local function BuildUI()
 
     -- ── Filter buttons ───────────────────────────────────────────────────────
     local filterY = -PAD
-    CreateFilterButton(content, "Invites",    "INVITE",  PAD,      filterY)
+    CreateFilterButton(content, "Invites",    {"INVITE", "JOIN"},  PAD,      filterY)
     CreateFilterButton(content, "Removals",   "REMOVE",  PAD+78,   filterY)
     CreateFilterButton(content, "Leaves",     "LEAVE",   PAD+156,  filterY)
     CreateFilterButton(content, "Promotions", "PROMOTE", PAD+234,  filterY)
@@ -290,6 +296,14 @@ local function BuildUI()
         RebuildList()
     end)
 
+    local blizzBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    blizzBtn:SetSize(90, 22)
+    blizzBtn:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", PAD+172, PAD)
+    blizzBtn:SetText("Blizzard Log")
+    blizzBtn:SetScript("OnClick", function()
+        GuildLog.OpenNativeLog()
+    end)
+
     -- Register with UISpecialFrames so Escape closes the window
     _G["GuildLogMainFrame"] = mainFrame
     table.insert(UISpecialFrames, "GuildLogMainFrame")
@@ -301,6 +315,10 @@ function GuildLogUI_Open()
     BuildUI()
     RebuildList()
     aceFrame:Show()
+end
+
+function GuildLogUI_IsOpen()
+    return mainFrame ~= nil and mainFrame:IsShown()
 end
 
 -- Called by GuildLog.lua when a new entry arrives while window is open

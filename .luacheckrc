@@ -10,6 +10,7 @@ globals = {
     "GuildLogUI",
     "GuildLogDB",
     "GuildLogUI_Open",
+    "GuildLogUI_IsOpen",
 
     -- Named frames (registered with WoW by string name)
     "GuildLogFrame",
