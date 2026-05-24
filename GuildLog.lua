@@ -295,23 +295,39 @@ function GuildLog:OnEnable()
         end
     end
 
-    EventUtil.ContinueOnAddOnLoaded("Blizzard_Communities", function()
-        if CommunitiesGuildLogFrame then
-            -- If the user clicked "View Log" before Blizzard_Communities finished loading,
-            -- the frame is already visible now -- redirect immediately.
-            if CommunitiesGuildLogFrame:IsShown() and not allowNativeLog then
-                CommunitiesGuildLogFrame:Hide()
-                GuildLogUI_Open()
+    -- CommunitiesGuildLogFrame may be nil when Blizzard_Communities first loads if it is
+    -- created lazily.  Poll until it exists, then register the OnShow hook exactly once.
+    -- The hide is deferred one frame so CommunitiesFrame finishes its own show cycle
+    -- before we interrupt it; calling Hide() synchronously inside OnShow was causing
+    -- GuildLog to open and immediately close (invisible to the user on the first click).
+    local guildLogFrameHooked = false
+    local function TryHookGuildLogFrame()
+        if guildLogFrameHooked or not CommunitiesGuildLogFrame then return end
+        guildLogFrameHooked = true
+        CommunitiesGuildLogFrame:HookScript("OnShow", function(frame)
+            if allowNativeLog then
+                allowNativeLog = false
+                return
             end
-            CommunitiesGuildLogFrame:HookScript("OnShow", function(frame)
-                if allowNativeLog then
-                    allowNativeLog = false
-                    return
-                end
-                frame:Hide()
+            C_Timer.After(0, function()
+                if frame:IsShown() then frame:Hide() end
                 GuildLogUI_Open()
             end)
+        end)
+    end
+
+    EventUtil.ContinueOnAddOnLoaded("Blizzard_Communities", function()
+        local attempts = 0
+        local function Poll()
+            TryHookGuildLogFrame()
+            if not guildLogFrameHooked then
+                attempts = attempts + 1
+                if attempts < 50 then
+                    C_Timer.After(0.1, Poll)
+                end
+            end
         end
+        Poll()
     end)
 
     C_GuildInfo.GuildRoster()
