@@ -118,14 +118,43 @@ end
 
 -- ── Blizzard guild log scan ───────────────────────────────────────────────────
 -- GUILD_EVENT_LOG_UPDATE fires when the server pushes events.
--- Blizzard replays the last 20 events on every login; IsDuplicate filters those.
+-- Blizzard replays the last 20 events on every login; the signature watermark
+-- prevents rescanning the same event list twice in a session.
+
+-- Signature of Blizzard's i=1 event at the end of the last scan.
+-- Resets to nil each session so a fresh relog always does a full retroactive scan.
+local lastScanSig = nil
+
+local function GetEventSig(i)
+    local et, p1, p2 = GetGuildEventInfo(i)
+    return (et or "") .. "\0" .. (p1 or "") .. "\0" .. (p2 or "")
+end
 
 local function ScanGuildLog()
     if not GuildLogDB then return end
     local total = GetNumGuildEvents()
     if total == 0 then return end
     local now = time()
-    for i = total, 1, -1 do
+
+    local currentSig = GetEventSig(1)
+
+    -- Determine how far back to scan.
+    -- nil lastScanSig  => first scan this session, process all 20 events.
+    -- matching sig     => nothing new, skip entirely.
+    -- changed sig      => find the old watermark in the list and process only the new events above it.
+    local startFrom = total
+    if lastScanSig ~= nil then
+        if currentSig == lastScanSig then return end
+        for i = 1, total do
+            if GetEventSig(i) == lastScanSig then
+                startFrom = i - 1
+                break
+            end
+        end
+        -- If old sig fell off the 20-event log, startFrom stays at total (scan all).
+    end
+
+    for i = startFrom, 1, -1 do
         local eventType, player1, player2, rankName, year, month, day, hour = GetGuildEventInfo(i)
         local ourType = eventType and BLIZZARD_TO_EVENT[eventType]
         if ourType then
@@ -158,6 +187,8 @@ local function ScanGuildLog()
             end
         end
     end
+
+    lastScanSig = currentSig
 end
 
 -- ── Startup dedup cleanup ─────────────────────────────────────────────────────
@@ -266,6 +297,12 @@ function GuildLog:OnEnable()
 
     EventUtil.ContinueOnAddOnLoaded("Blizzard_Communities", function()
         if CommunitiesGuildLogFrame then
+            -- If the user clicked "View Log" before Blizzard_Communities finished loading,
+            -- the frame is already visible now -- redirect immediately.
+            if CommunitiesGuildLogFrame:IsShown() and not allowNativeLog then
+                CommunitiesGuildLogFrame:Hide()
+                GuildLogUI_Open()
+            end
             CommunitiesGuildLogFrame:HookScript("OnShow", function(frame)
                 if allowNativeLog then
                     allowNativeLog = false
