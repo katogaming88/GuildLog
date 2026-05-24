@@ -41,17 +41,20 @@ local function FormatTimestamp(t)
 end
 GuildLog.FormatTimestamp = FormatTimestamp
 
--- Fuzzy dedup for Blizzard's replayed events (absorbs clock drift on login).
--- Searches all entries so sync-prepended rows never push old entries past a
--- fixed limit and cause them to be re-inserted as duplicates.
--- Entries are newest-first, so we break as soon as we're past the 60-second window.
+-- Fuzzy dedup for Blizzard's replayed events.
+-- Blizzard's offset is a truncated integer (hours), so the same event scanned at
+-- two different login times that straddle an hour boundary produces approxTime
+-- values that differ by exactly 3600 seconds.  The mathematical upper bound on
+-- that drift is 7199 seconds (< 2 hours), so we use 7200 as the window.
+-- Entries are newest-first; the break exits once we are past the match window.
+local DEDUP_WINDOW = 7200
 local function IsDuplicate(ourType, actor, target, approxTime)
     for _, e in ipairs(GuildLogDB.entries) do
-        if e.timestamp < approxTime - 60 then break end
+        if e.timestamp < approxTime - DEDUP_WINDOW then break end
         if e.type   == ourType
            and e.actor  == (actor  or "")
            and e.target == (target or "")
-           and math.abs(e.timestamp - approxTime) < 60 then
+           and math.abs(e.timestamp - approxTime) < DEDUP_WINDOW then
             return true
         end
     end
@@ -172,7 +175,17 @@ function GuildLog:OnInitialize()
 end
 
 function GuildLog:OnEnable()
-    self:RegisterEvent("GUILD_EVENT_LOG_UPDATE", ScanGuildLog)
+    -- Debounce GUILD_EVENT_LOG_UPDATE: WoW fires it multiple times in rapid succession
+    -- on login.  Collapsing the burst ensures a single consistent `now` for the scan.
+    local scanTimer = nil
+    local function DebouncedScan()
+        if scanTimer then scanTimer:Cancel() end
+        scanTimer = C_Timer.NewTimer(0.5, function()
+            scanTimer = nil
+            ScanGuildLog()
+        end)
+    end
+    self:RegisterEvent("GUILD_EVENT_LOG_UPDATE", DebouncedScan)
     self:RegisterEvent("PLAYER_GUILD_UPDATE", function()
         C_GuildInfo.GuildRoster()
     end)

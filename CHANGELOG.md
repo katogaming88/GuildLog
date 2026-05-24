@@ -14,7 +14,7 @@ Update on every PR. Add your name to the version header line.
 - "Blizzard Log" button at the bottom of the window opens the default Blizzard guild event log without closing GuildLog. The existing "View Log" redirect is bypassed for this one open so both windows can be compared.
 
 ### Fixed
-- Duplicate entries accumulated across sessions when the sync channel prepended many entries to the log, pushing older Blizzard-log events past the previous 60-entry dedup search window. `IsDuplicate` now walks the full entry list with a time-based early exit so entries can never fall outside its reach.
+- Duplicate entries accumulated across sessions. Root cause: Blizzard's hour offset is a truncated integer, so scanning the same event at two login times that straddle an hour boundary produces `approxTime` values that differ by exactly 3600 seconds -- well outside the previous 60-second dedup window. The mathematically correct upper bound on this drift is 7199 seconds, so `IsDuplicate` now uses a 7200-second window. `GUILD_EVENT_LOG_UPDATE` is also debounced (0.5 s) so rapid login-replay fires collapse into one scan with a single consistent timestamp.
 - Unknown actor names (WoW returns nil for deleted characters in the guild event log) now display as `(unknown)` instead of `?` for clarity.
 
 ---
