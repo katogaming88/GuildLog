@@ -317,6 +317,10 @@ function GuildLogUI_Open()
     aceFrame:Show()
 end
 
+function GuildLogUI_IsOpen()
+    return mainFrame ~= nil and mainFrame:IsShown()
+end
+
 -- Called by GuildLog.lua when a new entry arrives while window is open
 GuildLog.OnNewEntry = function(_)
     if mainFrame and mainFrame:IsShown() then

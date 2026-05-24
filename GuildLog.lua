@@ -303,12 +303,17 @@ function GuildLog:OnEnable()
     local function TryHookGuildLogFrame()
         if guildLogFrameHooked or not CommunitiesGuildLogFrame then return end
         guildLogFrameHooked = true
+
         CommunitiesGuildLogFrame:HookScript("OnShow", function(frame)
             if allowNativeLog then
                 allowNativeLog = false
                 return
             end
             C_Timer.After(0, function()
+                -- If GuildLog is already open, don't hide CommunitiesGuildLogFrame again.
+                -- Directly calling Hide() on CommunitiesGuildLogFrame breaks CommunitiesFrame's
+                -- internal state machine; a second Hide() causes CommunitiesFrame to close itself.
+                if GuildLogUI_IsOpen() then return end
                 if frame:IsShown() then frame:Hide() end
                 GuildLogUI_Open()
             end)
