@@ -10,6 +10,9 @@ Update on every PR. Add your name to the version header line.
 
 ## [0.3.3] — 2026-05-24 — Katorri
 
+### Added
+- "Blizzard Log" button at the bottom of the window opens the default Blizzard guild event log without closing GuildLog. The existing "View Log" redirect is bypassed for this one open so both windows can be compared.
+
 ### Fixed
 - Duplicate entries accumulated across sessions when the sync channel prepended many entries to the log, pushing older Blizzard-log events past the previous 60-entry dedup search window. `IsDuplicate` now walks the full entry list with a time-based early exit so entries can never fall outside its reach.
 - Unknown actor names (WoW returns nil for deleted characters in the guild event log) now display as `(unknown)` instead of `?` for clarity.

@@ -177,10 +177,25 @@ function GuildLog:OnEnable()
         C_GuildInfo.GuildRoster()
     end)
 
-    -- Intercept Blizzard's guild log frame so "View Log" opens our UI instead
+    -- Intercept Blizzard's guild log frame so "View Log" opens our UI instead.
+    -- allowNativeLog bypasses the redirect for one show (used by the UI button).
+    local allowNativeLog = false
+    GuildLog.OpenNativeLog = function()
+        if CommunitiesGuildLogFrame then
+            allowNativeLog = true
+            CommunitiesGuildLogFrame:Show()
+        else
+            print("|cff00ccff[GuildLog]|r Blizzard guild log is not available yet.")
+        end
+    end
+
     EventUtil.ContinueOnAddOnLoaded("Blizzard_Communities", function()
         if CommunitiesGuildLogFrame then
             CommunitiesGuildLogFrame:HookScript("OnShow", function(frame)
+                if allowNativeLog then
+                    allowNativeLog = false
+                    return
+                end
                 frame:Hide()
                 GuildLogUI_Open()
             end)

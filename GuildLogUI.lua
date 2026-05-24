@@ -290,6 +290,14 @@ local function BuildUI()
         RebuildList()
     end)
 
+    local blizzBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    blizzBtn:SetSize(90, 22)
+    blizzBtn:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", PAD+172, PAD)
+    blizzBtn:SetText("Blizzard Log")
+    blizzBtn:SetScript("OnClick", function()
+        GuildLog.OpenNativeLog()
+    end)
+
     -- Register with UISpecialFrames so Escape closes the window
     _G["GuildLogMainFrame"] = mainFrame
     table.insert(UISpecialFrames, "GuildLogMainFrame")
