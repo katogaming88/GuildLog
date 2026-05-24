@@ -41,11 +41,13 @@ local function FormatTimestamp(t)
 end
 GuildLog.FormatTimestamp = FormatTimestamp
 
--- Fuzzy dedup for Blizzard's replayed events (absorbs clock drift on login)
+-- Fuzzy dedup for Blizzard's replayed events (absorbs clock drift on login).
+-- Searches all entries so sync-prepended rows never push old entries past a
+-- fixed limit and cause them to be re-inserted as duplicates.
+-- Entries are newest-first, so we break as soon as we're past the 60-second window.
 local function IsDuplicate(ourType, actor, target, approxTime)
-    local limit = math.min(60, #GuildLogDB.entries)
-    for i = 1, limit do
-        local e = GuildLogDB.entries[i]
+    for _, e in ipairs(GuildLogDB.entries) do
+        if e.timestamp < approxTime - 60 then break end
         if e.type   == ourType
            and e.actor  == (actor  or "")
            and e.target == (target or "")

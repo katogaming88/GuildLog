@@ -8,6 +8,14 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.3.3] — 2026-05-24 — Katorri
+
+### Fixed
+- Duplicate entries accumulated across sessions when the sync channel prepended many entries to the log, pushing older Blizzard-log events past the previous 60-entry dedup search window. `IsDuplicate` now walks the full entry list with a time-based early exit so entries can never fall outside its reach.
+- Unknown actor names (WoW returns nil for deleted characters in the guild event log) now display as `(unknown)` instead of `?` for clarity.
+
+---
+
 ## [0.3.2] — 2026-05-22 — Katorri
 
 ### Fixed

@@ -57,17 +57,17 @@ local function BuildRowText(entry)
 
     local msg
     if entry.type == "INVITE" then
-        msg = (actor or "?") .. color .. " invited " .. COLOR_RESET .. (target or "?")
+        msg = (actor or "(unknown)") .. color .. " invited " .. COLOR_RESET .. (target or "(unknown)")
     elseif entry.type == "REMOVE" then
-        msg = (actor or "?") .. color .. " kicked " .. COLOR_RESET .. (target or "?")
+        msg = (actor or "(unknown)") .. color .. " kicked " .. COLOR_RESET .. (target or "(unknown)")
     elseif entry.type == "LEAVE" then
-        msg = (actor or "?") .. color .. " left the guild" .. COLOR_RESET
+        msg = (actor or "(unknown)") .. color .. " left the guild" .. COLOR_RESET
     elseif entry.type == "PROMOTE" then
         local rank = entry.newRank ~= "" and (COLOR_RANK .. " -> " .. entry.newRank .. COLOR_RESET) or ""
-        msg = (actor or "?") .. color .. " promoted " .. COLOR_RESET .. (target or "?") .. rank
+        msg = (actor or "(unknown)") .. color .. " promoted " .. COLOR_RESET .. (target or "(unknown)") .. rank
     elseif entry.type == "DEMOTE" then
         local rank = entry.newRank ~= "" and (COLOR_RANK .. " -> " .. entry.newRank .. COLOR_RESET) or ""
-        msg = (actor or "?") .. color .. " demoted " .. COLOR_RESET .. (target or "?") .. rank
+        msg = (actor or "(unknown)") .. color .. " demoted " .. COLOR_RESET .. (target or "(unknown)") .. rank
     else
         msg = color .. label .. COLOR_RESET .. " " .. (target or "")
     end
