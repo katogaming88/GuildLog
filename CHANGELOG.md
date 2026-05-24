@@ -22,6 +22,7 @@ Update on every PR. Add your name to the version header line.
 - Unknown actor names (WoW returns nil for deleted characters in the guild event log) now display as `(unknown)` instead of `?` for clarity.
 - Duplicate entries still accumulating after the dedup window fix: `GUILD_EVENT_LOG_UPDATE` fires multiple times per session (login replay plus once per live event), and each firing rescanned all 20 Blizzard events. Added a per-session signature watermark (type+player fields of Blizzard's i=1 event); a scan whose i=1 matches the previous scan's is skipped entirely, and a scan where i=1 changed processes only the new events above the old watermark. `IsDuplicate` is kept as a cross-session safety net.
 - "View Log" in the Communities frame required two clicks: clicking it triggers on-demand loading of `Blizzard_Communities`, so the `OnShow` hook was not yet registered when the frame first appeared. The `ContinueOnAddOnLoaded` callback now immediately redirects if the frame is already visible when the callback fires.
+- `(unknown) left the guild` entries: LEAVE events where `GetGuildEventInfo` returns nil for `player1` are now skipped on scan (same pattern as the existing nil-target INVITE filter). The startup cleanup pass now also removes any already-stored nameless LEAVE entries.
 
 ---
 

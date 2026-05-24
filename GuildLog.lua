@@ -164,6 +164,8 @@ local function ScanGuildLog()
             -- invite to avoid an "(unknown)" duplicate.
             if ourType == EVENT_INVITE and (player2 == nil or player2 == "") then
                 -- luacheck: ignore (intentional no-op)
+            elseif ourType == EVENT_LEAVE and (player1 == nil or player1 == "") then
+                -- luacheck: ignore (intentional no-op)
             else
                 -- GetGuildEventInfo returns offsets: years/months/days/hours ago.
                 -- Subtract them from today's date using date("*t") so calendar arithmetic is correct.
@@ -209,8 +211,10 @@ local function PurgeExistingDuplicates()
     local kept   = {}
     local byKey  = {}  -- "type\1actor\1target" -> list of kept timestamps
     for _, e in ipairs(entries) do
-        -- Drop old spurious empty-target INVITE entries (join notifications).
-        if e.type == "INVITE" and (e.target == nil or e.target == "") then
+        -- Drop spurious empty-actor LEAVE entries and empty-target INVITE entries.
+        if e.type == "LEAVE" and (e.actor == nil or e.actor == "") then
+            -- intentionally skipped
+        elseif e.type == "INVITE" and (e.target == nil or e.target == "") then
             -- intentionally skipped
         else
             local key   = (e.type or "") .. "\1" .. (e.actor or "") .. "\1" .. (e.target or "")
