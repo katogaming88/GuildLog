@@ -149,11 +149,55 @@ local function ScanGuildLog()
     end
 end
 
+-- ── Startup dedup cleanup ─────────────────────────────────────────────────────
+-- Removes duplicate entries that accumulated before the 7200-second dedup window
+-- was introduced.  Groups by (type, actor, target); within each group, drops any
+-- entry whose timestamp is within 3600 seconds of an already-kept entry.
+-- Safe to run every load -- idempotent once the log is clean.
+
+local function PurgeExistingDuplicates()
+    local entries = GuildLogDB.entries
+    local before = #entries
+    if before < 2 then return end
+
+    table.sort(entries, function(a, b) return a.timestamp > b.timestamp end)
+
+    local kept   = {}
+    local byKey  = {}  -- "type\1actor\1target" -> list of kept timestamps
+    for _, e in ipairs(entries) do
+        local key   = (e.type or "") .. "\1" .. (e.actor or "") .. "\1" .. (e.target or "")
+        local times = byKey[key]
+        local isDup = false
+        if times then
+            for _, t in ipairs(times) do
+                if math.abs(t - e.timestamp) <= 3600 then
+                    isDup = true
+                    break
+                end
+            end
+        end
+        if not isDup then
+            kept[#kept + 1] = e
+            if not byKey[key] then byKey[key] = {} end
+            local ts = byKey[key]
+            ts[#ts + 1] = e.timestamp
+        end
+    end
+
+    local removed = before - #kept
+    if removed > 0 then
+        GuildLogDB.entries = kept
+        print(string.format("|cff00ccff[GuildLog]|r Cleaned up %d duplicate %s.",
+            removed, removed == 1 and "entry" or "entries"))
+    end
+end
+
 -- ── AceAddon lifecycle ────────────────────────────────────────────────────────
 
 function GuildLog:OnInitialize()
     GuildLogDB = GuildLogDB or {}
     GuildLogDB.entries = GuildLogDB.entries or {}
+    PurgeExistingDuplicates()
 
     self:RegisterComm(COMM_PREFIX)
 
