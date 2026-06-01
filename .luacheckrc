@@ -43,6 +43,8 @@ globals = {
     -- WoW Communities / guild pane
     "EventUtil",
     "CommunitiesGuildLogFrame",
+    "CommunitiesFrame",
+    "HideUIPanel",
 
     -- Ace3 / LibStub
     "LibStub",
