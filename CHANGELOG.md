@@ -8,6 +8,13 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.3.4] — 2026-05-24 — Katorri
+
+### Fixed
+- ESC stops working after closing GuildLog when opened via the guild pane "View Log" button. Root cause: the hook hid `CommunitiesGuildLogFrame` (the child) directly, which corrupted CommunitiesFrame's internal state machine, leaving CommunitiesFrame open in a state where ESC was consumed each press but the frame never closed. The hook now calls `HideUIPanel(CommunitiesFrame)` on the parent instead, which closes the Communities panel cleanly.
+
+---
+
 ## [0.3.3] — 2026-05-24 — Katorri
 
 ### Added

@@ -304,17 +304,20 @@ function GuildLog:OnEnable()
         if guildLogFrameHooked or not CommunitiesGuildLogFrame then return end
         guildLogFrameHooked = true
 
-        CommunitiesGuildLogFrame:HookScript("OnShow", function(frame)
+        CommunitiesGuildLogFrame:HookScript("OnShow", function(_frame)
             if allowNativeLog then
                 allowNativeLog = false
                 return
             end
             C_Timer.After(0, function()
-                -- If GuildLog is already open, don't hide CommunitiesGuildLogFrame again.
-                -- Directly calling Hide() on CommunitiesGuildLogFrame breaks CommunitiesFrame's
-                -- internal state machine; a second Hide() causes CommunitiesFrame to close itself.
                 if GuildLogUI_IsOpen() then return end
-                if frame:IsShown() then frame:Hide() end
+                -- Hide CommunitiesFrame (parent) via HideUIPanel rather than hiding
+                -- CommunitiesGuildLogFrame (child) directly. Hiding the child bypasses
+                -- CommunitiesFrame's internal state machine, leaving it open in a broken
+                -- state where ESC is consumed every press but CommunitiesFrame never closes.
+                if CommunitiesFrame and CommunitiesFrame:IsShown() then
+                    HideUIPanel(CommunitiesFrame)
+                end
                 GuildLogUI_Open()
             end)
         end)
