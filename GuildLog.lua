@@ -6,10 +6,10 @@ local AceSerializer = LibStub("AceSerializer-3.0")
 
 GuildLog.MAX_ENTRIES = 0  -- 0 = unlimited
 
-local COMM_PREFIX = "GuildLog"  -- must be ≤16 chars
+local COMM_PREFIX = "GuildLog"  -- must be <=16 chars
 local SYNC_DELAY  = 5           -- seconds after login before requesting catch-up
 
--- ── Event type constants ──────────────────────────────────────────────────────
+-- == Event type constants =====================================================
 
 local EVENT_INVITE  = "INVITE"
 local EVENT_JOIN    = "JOIN"
@@ -37,7 +37,7 @@ local BLIZZARD_TO_EVENT = {
     demote  = EVENT_DEMOTE,
 }
 
--- ── Helpers ───────────────────────────────────────────────────────────────────
+-- == Helpers ==================================================================
 
 local function FormatTimestamp(t)
     return date("%Y-%m-%d %H:%M:%S", t)
@@ -116,7 +116,99 @@ local function InsertEntryOrdered(entry)
     end
 end
 
--- ── Blizzard guild log scan ───────────────────────────────────────────────────
+-- == Live event detection =====================================================
+-- Architecture mirrors GRM exactly:
+--   1. Plain-string substring check to identify which guild event fired.
+--   2. WoW global string pattern to extract names/rank from the message.
+--   3. IsInGuild() guard so no processing happens outside a guild.
+-- The startup scan (GUILD_EVENT_LOG_UPDATE + QueryGuildEventLog) stays as the
+-- catch-up pass for events that happened while offline.
+
+-- Converts a WoW printf-style global string to a Lua extraction pattern.
+-- "([%%S]+)" for player-name captures (WoW names have no spaces).
+-- "(.+)"     for rank-name captures (rank names may contain spaces).
+local function MakePattern(fmt, capture)
+    return fmt:gsub("%%s", capture)
+end
+
+-- Pre-built extraction patterns; populated once in OnEnable.
+local pat_join    -- extracts the joining player name
+local pat_kick    -- extracts kicked player + kicker  (ERR_GUILD_REMOVE_SS order)
+local pat_promote -- extracts officer, player, new rank
+local pat_demote
+
+local function BuildLivePatterns()
+    pat_join    = MakePattern(ERR_GUILD_JOIN_S,      "([%%S]+)")
+    pat_kick    = MakePattern(ERR_GUILD_REMOVE_SS,   "([%%S]+)")
+    pat_promote = MakePattern(ERR_GUILD_PROMOTE_SSS, "(.+)")
+    pat_demote  = MakePattern(ERR_GUILD_DEMOTE_SSS,  "(.+)")
+end
+
+-- Scan the roster for a joining member's rank (~1 s after join to let roster update).
+local function FindMemberRank(name)
+    local count = GetNumGuildMembers()
+    for i = 1, count do
+        local fullName, rankName = GetGuildRosterInfo(i)
+        if fullName then
+            local shortName = fullName:match("^([^%-]+)")
+            if shortName == name or fullName == name then
+                return rankName or ""
+            end
+        end
+    end
+    return ""
+end
+
+local function HandleLiveGuildEvent(_, message)
+    if not GuildLogDB or not IsInGuild() then return end
+    local now = time()
+
+    if message:find("joined the guild.", 1, true) then
+        local name = message:match(pat_join)
+        if not name then return end
+        C_GuildInfo.GuildRoster()
+        QueryGuildEventLog()
+        C_Timer.After(1, function()
+            if IsDuplicate(EVENT_JOIN, name, "", now) then return end
+            AddEntry(EVENT_JOIN, name, "", FindMemberRank(name), "", now)
+        end)
+
+    elseif message:find("left the guild.", 1, true) then
+        -- GRM extracts leave name as first word (everything before the first space)
+        local name = message:sub(1, (message:find(" ", 1, true) or 2) - 1)
+        if name == "" then return end
+        C_GuildInfo.GuildRoster()
+        QueryGuildEventLog()
+        if not IsDuplicate(EVENT_LEAVE, name, "", now) then
+            AddEntry(EVENT_LEAVE, name, "", "", "", now)
+        end
+
+    elseif message:find("has been kicked", 1, true) then
+        local kicked, kicker = message:match(pat_kick)
+        if not kicked then return end
+        C_GuildInfo.GuildRoster()
+        QueryGuildEventLog()
+        if not IsDuplicate(EVENT_REMOVE, kicked, "", now) then
+            AddEntry(EVENT_REMOVE, kicker, kicked, "", "", now)
+        end
+
+    elseif message:find("has promoted", 1, true) then
+        local officer, target, rank = message:match(pat_promote)
+        if not officer then return end
+        if not IsDuplicate(EVENT_PROMOTE, officer, target, now) then
+            AddEntry(EVENT_PROMOTE, officer, target, "", rank, now)
+        end
+
+    elseif message:find("has demoted", 1, true) then
+        local officer, target, rank = message:match(pat_demote)
+        if not officer then return end
+        if not IsDuplicate(EVENT_DEMOTE, officer, target, now) then
+            AddEntry(EVENT_DEMOTE, officer, target, "", rank, now)
+        end
+    end
+end
+
+-- == Blizzard guild log scan ==================================================
 -- GUILD_EVENT_LOG_UPDATE fires when the server pushes events.
 -- Blizzard replays the last 20 events on every login; the signature watermark
 -- prevents rescanning the same event list twice in a session.
@@ -131,10 +223,11 @@ local function GetEventSig(i)
 end
 
 local function ScanGuildLog()
-    if not GuildLogDB then return end
+    if not GuildLogDB then return 0 end
     local total = GetNumGuildEvents()
-    if total == 0 then return end
+    if total == 0 then return 0 end
     local now = time()
+    local added = 0
 
     local currentSig = GetEventSig(1)
 
@@ -183,15 +276,27 @@ local function ScanGuildLog()
                         rank = rankName
                     end
                     AddEntry(ourType, player1, player2, rank, newRank, approxTime)
+                    added = added + 1
                 end
             end
         end
     end
 
     lastScanSig = currentSig
+    return added
 end
 
--- ── Startup dedup cleanup ─────────────────────────────────────────────────────
+-- Forces a full re-scan of Blizzard's guild event log from scratch.
+-- Called by the Refresh button, and implicitly after Clear Log.
+-- Resets the watermark so ScanGuildLog processes all 20 events on the next
+-- GUILD_EVENT_LOG_UPDATE, then requests fresh data from the server.
+function GuildLog.ForceRescan()
+    lastScanSig = nil
+    C_GuildInfo.GuildRoster()
+    QueryGuildEventLog()
+end
+
+-- == Startup dedup cleanup ====================================================
 -- 1. Drops INVITE entries with an empty target -- these are the spurious join
 --    notifications WoW logs alongside the real invite; proper "join" events are
 --    now captured via the EVENT_JOIN type instead.
@@ -240,7 +345,7 @@ local function PurgeExistingDuplicates()
     end
 end
 
--- ── AceAddon lifecycle ────────────────────────────────────────────────────────
+-- == AceAddon lifecycle =======================================================
 
 function GuildLog:OnInitialize()
     GuildLogDB = GuildLogDB or {}
@@ -267,19 +372,41 @@ function GuildLog:OnInitialize()
 end
 
 function GuildLog:OnEnable()
+    BuildLivePatterns()
+    self:RegisterEvent("CHAT_MSG_SYSTEM", HandleLiveGuildEvent)
+
     -- Debounce GUILD_EVENT_LOG_UPDATE: WoW fires it multiple times in rapid succession
     -- on login.  Collapsing the burst ensures a single consistent `now` for the scan.
+    -- loginScanDone gates the one-time login summary message so it only prints once.
     local scanTimer = nil
+    local loginScanDone = false
     local function DebouncedScan()
         if scanTimer then scanTimer:Cancel() end
         scanTimer = C_Timer.NewTimer(0.5, function()
             scanTimer = nil
-            ScanGuildLog()
+            local added = ScanGuildLog()
+            if not loginScanDone then
+                loginScanDone = true
+                if added > 0 then
+                    print(string.format(
+                        "|cff00ccff[GuildLog]|r Startup scan complete -- %d new %s since last session.",
+                        added, added == 1 and "event" or "events"))
+                else
+                    print("|cff00ccff[GuildLog]|r Startup scan complete -- no new events.")
+                end
+            end
         end)
     end
     self:RegisterEvent("GUILD_EVENT_LOG_UPDATE", DebouncedScan)
     self:RegisterEvent("PLAYER_GUILD_UPDATE", function()
         C_GuildInfo.GuildRoster()
+    end)
+
+    -- Request guild event log data from the server on login so
+    -- GUILD_EVENT_LOG_UPDATE fires and ScanGuildLog picks up offline events.
+    -- Without this explicit request the event never fires automatically.
+    C_Timer.After(2, function()
+        QueryGuildEventLog()
     end)
 
     -- Intercept Blizzard's guild log frame so "View Log" opens our UI instead.
@@ -345,11 +472,11 @@ function GuildLog:OnEnable()
     end)
 end
 
--- ── Sync protocol ─────────────────────────────────────────────────────────────
+-- == Sync protocol ============================================================
 --
 -- On login this client broadcasts REQ to the GUILD channel with its newest
 -- timestamp. Every online member with the addon whispers back DATA containing
--- any entries newer than that timestamp. Multiple responders is fine —
+-- any entries newer than that timestamp. Multiple responders is fine --
 -- IsSyncDuplicate prevents double-inserts.
 --
 -- AceComm-3.0 handles chunking automatically, so large histories are safe.
