@@ -279,6 +279,7 @@ local function BuildUI()
             OnAccept  = function()
                 GuildLogDB.entries = {}
                 RebuildList()
+                GuildLog.ForceRescan()
                 print("|cff00ccff[GuildLog]|r Log cleared.")
             end,
             timeout      = 0,
@@ -294,6 +295,7 @@ local function BuildUI()
     refreshBtn:SetText("Refresh")
     refreshBtn:SetScript("OnClick", function()
         RebuildList()
+        GuildLog.ForceRescan()
     end)
 
     local blizzBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")

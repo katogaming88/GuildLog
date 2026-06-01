@@ -8,6 +8,38 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.4.0] — 2026-06-01 — Katorri
+
+### Added
+- Real-time guild event detection via `CHAT_MSG_SYSTEM`. Join, leave, kick,
+  promotion, and demotion events are now recorded the moment they happen
+  without opening the Blizzard guild log or `/reload`. Detection uses plain
+  substring guards (same approach as GRM) so unrelated system messages --
+  spell learns, online/offline notifications, etc. -- are never matched.
+  Name extraction uses WoW global strings (`ERR_GUILD_JOIN_S`,
+  `ERR_GUILD_REMOVE_SS`, `ERR_GUILD_PROMOTE_SSS`, `ERR_GUILD_DEMOTE_SSS`)
+  with `[%S]+` captures for player names and `(.+)` for rank text.
+- JOIN events captured live include the new member's starting rank, looked up
+  from the roster 1 second after the system message fires to allow the API
+  to update.
+- `QueryGuildEventLog()` is called on login (2 s delay) so the startup
+  Blizzard scan runs automatically without requiring the native guild log to
+  be opened. It is also called alongside `GuildRoster()` whenever a live
+  join, leave, or kick is detected, keeping Blizzard's buffer in sync.
+- Login summary message: after the startup scan completes, a chat message
+  reports how many new events were found since the last session.
+- `GuildLog.ForceRescan()` resets the scan watermark and re-requests
+  Blizzard's event log. Called by the Refresh button and automatically after
+  Clear Log so the last 20 events repopulate immediately.
+
+### Fixed
+- Refresh button now re-fetches data from Blizzard's event log instead of
+  only re-filtering the in-memory list.
+- Clear Log now triggers a rescan so the log repopulates from Blizzard's
+  buffer without needing a manual Refresh click.
+
+---
+
 ## [0.3.4] — 2026-05-24 — Katorri
 
 ### Fixed

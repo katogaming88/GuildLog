@@ -35,10 +35,20 @@ globals = {
     -- WoW guild API
     "GetNumGuildEvents",
     "GetGuildEventInfo",
+    "GetNumGuildMembers",
+    "GetGuildRosterInfo",
+    "QueryGuildEventLog",
+    "IsInGuild",
     "GuildRequestMemberInfo",
     "C_GuildInfo",
     "C_Timer",
     "UnitName",
+
+    -- WoW global format strings used for pattern building
+    "ERR_GUILD_JOIN_S",
+    "ERR_GUILD_REMOVE_SS",
+    "ERR_GUILD_PROMOTE_SSS",
+    "ERR_GUILD_DEMOTE_SSS",
 
     -- WoW Communities / guild pane
     "EventUtil",
