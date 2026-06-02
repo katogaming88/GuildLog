@@ -8,6 +8,17 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.4.1] — 2026-06-02 — Katorri
+
+### Fixed
+- Lua error during combat (Mythic+, raids): the live `CHAT_MSG_SYSTEM`
+  handler tried to index `message` while it was a patch 12.0 "secret string"
+  value, which combat-related system messages now are when delivered to addon
+  code. The handler now bails out via `issecretvalue` before any pattern
+  matching. Guild events are never secret, so no real events are missed.
+
+---
+
 ## [0.4.0] — 2026-06-01 — Katorri
 
 ### Added

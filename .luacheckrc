@@ -65,6 +65,7 @@ globals = {
     "SLASH_GUILDLOG2",
 
     -- WoW Lua overrides / additions (not in standard lua51 std)
+    "issecretvalue",
     "date",
     "time",
     "wipe",

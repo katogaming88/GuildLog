@@ -161,6 +161,13 @@ end
 
 local function HandleLiveGuildEvent(_, message)
     if not GuildLogDB or not IsInGuild() then return end
+
+    -- Patch 12.0 secret values: CHAT_MSG_SYSTEM messages delivered to tainted
+    -- (addon) code during combat arrive as "secret strings" that cannot be
+    -- indexed or pattern-matched (message:find errors out). Guild events are
+    -- never secret, so any secret message is noise to us -- bail before indexing.
+    if issecretvalue and issecretvalue(message) then return end
+
     local now = time()
 
     if message:find("joined the guild.", 1, true) then
