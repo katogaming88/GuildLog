@@ -8,6 +8,13 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.4.2] — 2026-06-16 — Katorri
+
+### Changed
+- Bumped TOC interface version to 120007 for patch 12.0.7 compatibility.
+
+---
+
 ## [0.4.1] — 2026-06-02 — Katorri
 
 ### Fixed
