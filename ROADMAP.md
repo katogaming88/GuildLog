@@ -37,8 +37,11 @@ Planned and considered improvements, roughly in priority order. Nothing here is 
 
 ### Additional event types
 - Guild MOTD changes (if exposed by the API)
-- Officer note edits
 - Guild bank withdrawals / deposits (via `GUILDBANKFRAME_OPENED` + `GetGuildBankTransaction`)
+
+### Membership duration + notes on leave/kick
+- Track each member's join date (already captured via the JOIN entry's timestamp) and, when they LEAVE or get REMOVE(kicked), show how long they'd been a member (join date -> departure date, e.g. "4 months")
+- Capture their public and officer note as of that moment on the LEAVE/REMOVE entry, since both go stale/disappear once they're off the roster (the roster snapshot scan already has this data available at diff time -- would need to snapshot it onto the entry rather than just diffing it away)
 
 ---
 

@@ -64,6 +64,22 @@ globals = {
     "SLASH_GUILDLOG1",
     "SLASH_GUILDLOG2",
 
+    -- WoW addon profiling API (/glog stats)
+    "UpdateAddOnMemoryUsage",
+    "GetAddOnMemoryUsage",
+    "UpdateAddOnCPUUsage",
+    "GetAddOnCPUUsage",
+    "GetCVar",
+
+    -- WoW input state
+    "IsShiftKeyDown",
+
+    -- WoW shared font templates
+    "GameFontDisable",
+    "GameFontHighlight",
+    "GameFontNormal",
+    "GameFontNormalLarge",
+
     -- WoW Lua overrides / additions (not in standard lua51 std)
     "issecretvalue",
     "date",

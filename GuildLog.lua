@@ -17,6 +17,8 @@ local EVENT_REMOVE  = "REMOVE"
 local EVENT_LEAVE   = "LEAVE"
 local EVENT_PROMOTE = "PROMOTE"
 local EVENT_DEMOTE  = "DEMOTE"
+local EVENT_NOTE    = "NOTE"
+local EVENT_ONOTE   = "ONOTE"
 
 local EVENT_LABELS = {
     [EVENT_INVITE]  = "Invited",
@@ -25,6 +27,8 @@ local EVENT_LABELS = {
     [EVENT_LEAVE]   = "Left",
     [EVENT_PROMOTE] = "Promoted",
     [EVENT_DEMOTE]  = "Demoted",
+    [EVENT_NOTE]    = "Note changed",
+    [EVENT_ONOTE]   = "Officer note changed",
 }
 GuildLog.EVENT_LABELS = EVENT_LABELS
 
@@ -40,7 +44,7 @@ local BLIZZARD_TO_EVENT = {
 -- == Helpers ==================================================================
 
 local function FormatTimestamp(t)
-    return date("%Y-%m-%d %H:%M:%S", t)
+    return date("%m/%d/%y %I:%M %p", t)
 end
 GuildLog.FormatTimestamp = FormatTimestamp
 
@@ -51,17 +55,33 @@ GuildLog.FormatTimestamp = FormatTimestamp
 -- that drift is 7199 seconds (< 2 hours), so we use 7200 as the window.
 -- Entries are newest-first; the break exits once we are past the match window.
 local DEDUP_WINDOW = 7200
-local function IsDuplicate(ourType, actor, target, approxTime)
+-- actor/target are each treated as a wildcard when either side is "" --
+-- the roster-snapshot backup scan (see below) doesn't know who performed a
+-- kick/promote/demote, only that it happened, so it records actor="" and
+-- still needs to match/be matched against the real actor name the live or
+-- log scan recorded for the same event. Likewise a JOIN's target holds the
+-- inviter when known (see ScanGuildLog): a live-detected join (target="")
+-- and the same join later confirmed via Blizzard's log (target=officer)
+-- must still be recognized as the same event.
+-- Returns the matching entry (or nil), so callers can also use it to backfill
+-- a field discovered later -- see the JOIN inviter backfill in ScanGuildLog.
+local function FindDuplicate(ourType, actor, target, approxTime)
+    actor  = actor  or ""
+    target = target or ""
     for _, e in ipairs(GuildLogDB.entries) do
         if e.timestamp < approxTime - DEDUP_WINDOW then break end
         if e.type   == ourType
-           and e.actor  == (actor  or "")
-           and e.target == (target or "")
+           and (e.actor  == actor  or e.actor  == "" or actor  == "")
+           and (e.target == target or e.target == "" or target == "")
            and math.abs(e.timestamp - approxTime) < DEDUP_WINDOW then
-            return true
+            return e
         end
     end
-    return false
+    return nil
+end
+
+local function IsDuplicate(ourType, actor, target, approxTime)
+    return FindDuplicate(ourType, actor, target, approxTime) ~= nil
 end
 
 -- Exact dedup for entries arriving over the sync channel
@@ -254,6 +274,13 @@ local function ScanGuildLog()
         -- If old sig fell off the 20-event log, startFrom stays at total (scan all).
     end
 
+    -- Invites are folded into their matching join rather than logged on their
+    -- own: an accepted invite reads as one "Joined" line with the inviter
+    -- shown as detail instead of two separate rows. Processing runs oldest to
+    -- newest (see loop direction below), so an invite is always seen before
+    -- its join within the same scan and can be stashed here for pairing.
+    local pendingInviters = {}  -- invitee name -> officer name
+
     for i = startFrom, 1, -1 do
         local eventType, player1, player2, rankName, year, month, day, hour = GetGuildEventInfo(i)
         local ourType = eventType and BLIZZARD_TO_EVENT[eventType]
@@ -264,6 +291,12 @@ local function ScanGuildLog()
             -- invite to avoid an "(unknown)" duplicate.
             local skip = (ourType == EVENT_INVITE and (player2 == nil or player2 == ""))
                       or (ourType == EVENT_LEAVE  and (player1 == nil or player1 == ""))
+
+            if ourType == EVENT_INVITE and not skip then
+                pendingInviters[player2] = player1
+                skip = true  -- never logged on its own; folded into the join below
+            end
+
             if not skip then
                 -- GetGuildEventInfo returns offsets: years/months/days/hours ago.
                 -- Subtract them from today's date using date("*t") so calendar arithmetic is correct.
@@ -275,14 +308,30 @@ local function ScanGuildLog()
                 d.min   = 0
                 d.sec   = 0
                 local approxTime = time(d)
-                if not IsDuplicate(ourType, player1, player2, approxTime) then
+
+                local invitedBy = ""
+                if ourType == EVENT_JOIN then
+                    invitedBy = pendingInviters[player1] or ""
+                    pendingInviters[player1] = nil
+                end
+                local target = (ourType == EVENT_JOIN) and invitedBy or player2
+
+                local existing = FindDuplicate(ourType, player1, target, approxTime)
+                if existing then
+                    -- A live-detected join (target="") predates the log confirming
+                    -- the inviter -- backfill it onto the same line instead of
+                    -- adding a second entry.
+                    if ourType == EVENT_JOIN and invitedBy ~= "" and existing.target == "" then
+                        existing.target = invitedBy
+                    end
+                else
                     local rank, newRank
                     if ourType == EVENT_PROMOTE or ourType == EVENT_DEMOTE then
                         newRank = rankName
                     else
                         rank = rankName
                     end
-                    AddEntry(ourType, player1, player2, rank, newRank, approxTime)
+                    AddEntry(ourType, player1, target, rank, newRank, approxTime)
                     added = added + 1
                 end
             end
@@ -293,22 +342,116 @@ local function ScanGuildLog()
     return added
 end
 
+-- == Roster snapshot scan =====================================================
+-- Backup detection layer, in the spirit of Guild Roster Manager: periodically
+-- snapshots GetGuildRosterInfo() and diffs it against the previous snapshot.
+-- This catches things the chat-message/event-log paths above can miss --
+-- membership or rank changes that happened while nobody with the addon was
+-- online, or events that fell off Blizzard's 20-entry event log cap -- and it's
+-- the only way to see public/officer note edits, since Blizzard exposes no chat
+-- message or log event for those at all.
+--
+-- The snapshot itself is the dedup mechanism for NOTE/ONOTE: a diff only fires
+-- once because the stored value is updated right after. JOIN/LEAVE/PROMOTE/
+-- DEMOTE backups run through the same IsDuplicate() the live/log paths use so
+-- they don't double up with an event those paths already recorded.
+--
+-- Declared here, ahead of ForceRescan below, so ForceRescan's reset of
+-- lastRosterScanTime resolves to this local instead of silently creating an
+-- unrelated global (Lua closures only capture locals already in scope at the
+-- point a function is defined -- ForceRescan used to be defined earlier in
+-- the file, before this declaration existed).
+local ROSTER_SCAN_MIN_INTERVAL = 30  -- seconds between full roster diffs
+local lastRosterScanTime = 0
+
 -- Forces a full re-scan of Blizzard's guild event log from scratch.
 -- Called by the Refresh button, and implicitly after Clear Log.
 -- Resets the watermark so ScanGuildLog processes all 20 events on the next
 -- GUILD_EVENT_LOG_UPDATE, then requests fresh data from the server.
 function GuildLog.ForceRescan()
     lastScanSig = nil
+    lastRosterScanTime = 0
     C_GuildInfo.GuildRoster()
     QueryGuildEventLog()
+end
+
+local function BuildRosterSnapshot()
+    local snapshot = {}
+    local count = GetNumGuildMembers()
+    for i = 1, count do
+        local name, rankName, rankIndex, level, _, _, note, officerNote = GetGuildRosterInfo(i)
+        if name and name ~= "" then
+            snapshot[name] = {
+                rankName    = rankName  or "",
+                rankIndex   = rankIndex or 0,
+                level       = level     or 0,
+                note        = note      or "",
+                officerNote = officerNote or "",
+            }
+        end
+    end
+    return snapshot
+end
+
+local function DiffRosterSnapshot(oldSnap, newSnap)
+    if not oldSnap then return end  -- first-ever snapshot: nothing to compare against
+    local now = time()
+
+    for name, new in pairs(newSnap) do
+        local old = oldSnap[name]
+        if not old then
+            if not IsDuplicate(EVENT_JOIN, name, "", now) then
+                AddEntry(EVENT_JOIN, name, "", new.rankName, "", now)
+            end
+        else
+            if new.rankIndex ~= old.rankIndex then
+                -- Lower rankIndex = higher rank in Blizzard's numbering.
+                local evt = (new.rankIndex > old.rankIndex) and EVENT_DEMOTE or EVENT_PROMOTE
+                if not IsDuplicate(evt, "", name, now) then
+                    AddEntry(evt, "", name, old.rankName, new.rankName, now)
+                end
+            end
+            if new.note ~= old.note then
+                AddEntry(EVENT_NOTE, name, "", old.note, new.note, now)
+            end
+            if new.officerNote ~= old.officerNote then
+                AddEntry(EVENT_ONOTE, name, "", old.officerNote, new.officerNote, now)
+            end
+        end
+    end
+
+    for name in pairs(oldSnap) do
+        if not newSnap[name] then
+            if not IsDuplicate(EVENT_LEAVE, name, "", now) then
+                AddEntry(EVENT_LEAVE, name, "", "", "", now)
+            end
+        end
+    end
+end
+
+-- Forces a fresh roster diff on the next GUILD_ROSTER_UPDATE by clearing the
+-- interval gate. Doesn't call GuildRoster() itself -- callers that need fresh
+-- server data should request it separately.
+local function ScanRosterForChanges()
+    if not GuildLogDB or not IsInGuild() then return end
+    local newSnap = BuildRosterSnapshot()
+    if next(newSnap) == nil then return end  -- roster not populated yet
+
+    DiffRosterSnapshot(GuildLogDB.rosterSnapshot, newSnap)
+    GuildLogDB.rosterSnapshot = newSnap
+    lastRosterScanTime = time()
 end
 
 -- == Startup dedup cleanup ====================================================
 -- 1. Drops INVITE entries with an empty target -- these are the spurious join
 --    notifications WoW logs alongside the real invite; proper "join" events are
 --    now captured via the EVENT_JOIN type instead.
--- 2. Removes time-based duplicates (same type/actor/target within 3600 s) that
---    accumulated before the 7200-second IsDuplicate window was introduced.
+-- 2. Removes time-based duplicates (same type/actor/target/rank/newRank within
+--    3600 s) that accumulated before the 7200-second IsDuplicate window was
+--    introduced. rank/newRank are part of the key -- without them, two
+--    different NOTE edits to the same player within the hour (same
+--    type/actor/target, different old/new text) would look identical and the
+--    older one would get dropped as a false "duplicate".
 -- Safe to run every load -- idempotent once the log is clean.
 
 local function PurgeExistingDuplicates()
@@ -319,12 +462,13 @@ local function PurgeExistingDuplicates()
     table.sort(entries, function(a, b) return a.timestamp > b.timestamp end)
 
     local kept   = {}
-    local byKey  = {}  -- "type\1actor\1target" -> list of kept timestamps
+    local byKey  = {}  -- "type\1actor\1target\1rank\1newRank" -> list of kept timestamps
     for _, e in ipairs(entries) do
         local skip = (e.type == "LEAVE"  and (e.actor  == nil or e.actor  == ""))
                   or (e.type == "INVITE" and (e.target == nil or e.target == ""))
         if not skip then
-            local key   = (e.type or "") .. "\1" .. (e.actor or "") .. "\1" .. (e.target or "")
+            local key = (e.type or "") .. "\1" .. (e.actor or "") .. "\1" .. (e.target or "")
+                     .. "\1" .. (e.rank or "") .. "\1" .. (e.newRank or "")
             local times = byKey[key]
             local isDup = false
             if times then
@@ -352,12 +496,64 @@ local function PurgeExistingDuplicates()
     end
 end
 
+-- One-time-per-load migration: ScanGuildLog used to log every invite as its
+-- own entry; it now folds an invite into its matching join instead (see
+-- ScanGuildLog). This merges any INVITE/JOIN pairs already sitting in a
+-- player's saved log from before that change, so old history reads the same
+-- way new entries do. Idempotent -- once merged, there are no more INVITE
+-- entries left to find, so this is a cheap no-op on every later load.
+local function MergeStoredInvites()
+    local entries = GuildLogDB.entries
+    if #entries < 2 then return end
+
+    -- JOIN entries with no inviter yet, grouped by joiner name.
+    local openJoins = {}
+    for _, e in ipairs(entries) do
+        if e.type == "JOIN" and e.target == "" then
+            openJoins[e.actor] = openJoins[e.actor] or {}
+            table.insert(openJoins[e.actor], e)
+        end
+    end
+
+    local toRemove = {}
+    local merged = 0
+    for idx, e in ipairs(entries) do
+        if e.type == "INVITE" then
+            local candidates = openJoins[e.target]
+            if candidates and #candidates > 0 then
+                -- Pick whichever candidate join is closest in time to this invite.
+                local bestPos, bestDiff
+                for pos, j in ipairs(candidates) do
+                    local diff = math.abs(j.timestamp - e.timestamp)
+                    if not bestDiff or diff < bestDiff then
+                        bestPos, bestDiff = pos, diff
+                    end
+                end
+                candidates[bestPos].target = e.actor
+                table.remove(candidates, bestPos)
+                toRemove[#toRemove + 1] = idx
+                merged = merged + 1
+            end
+        end
+    end
+
+    if merged > 0 then
+        table.sort(toRemove, function(a, b) return a > b end)
+        for _, idx in ipairs(toRemove) do
+            table.remove(entries, idx)
+        end
+        print(string.format("|cff00ccff[GuildLog]|r Merged %d invite %s into their matching Joined %s.",
+            merged, merged == 1 and "entry" or "entries", merged == 1 and "entry" or "entries"))
+    end
+end
+
 -- == AceAddon lifecycle =======================================================
 
 function GuildLog:OnInitialize()
     GuildLogDB = GuildLogDB or {}
     GuildLogDB.entries = GuildLogDB.entries or {}
     PurgeExistingDuplicates()
+    MergeStoredInvites()
 
     self:RegisterComm(COMM_PREFIX)
 
@@ -370,12 +566,27 @@ function GuildLog:OnInitialize()
             print("|cff00ccff[GuildLog]|r Log cleared.")
         elseif msg == "debug" then
             print("|cff00ccff[GuildLog]|r Entries stored: " .. #GuildLogDB.entries)
+        elseif msg == "stats" then
+            UpdateAddOnMemoryUsage()
+            local memKB = GetAddOnMemoryUsage("GuildLog")
+            local line = string.format("|cff00ccff[GuildLog]|r Memory: %.1f KB", memKB)
+            -- CPU tracking only accumulates while Lua script profiling is on; it's
+            -- off by default because profiling itself costs performance, so it's
+            -- opt-in rather than something GuildLog enables on your behalf.
+            if GetCVar("scriptProfile") == "1" then
+                UpdateAddOnCPUUsage()
+                local cpuMS = GetAddOnCPUUsage("GuildLog")
+                line = line .. string.format(" | CPU: %.2f ms (cumulative since profiling started)", cpuMS)
+            else
+                line = line .. " | CPU: run '/console scriptProfile 1' then /reload to enable CPU tracking"
+            end
+            print(line)
         else
             GuildLogUI_Open()
         end
     end
 
-    print("|cff00ccff[GuildLog]|r Loaded. Type |cffffff00/glog|r to open.")
+    print("|cff00ccff[GuildLog]|r Loaded. Type |cffffff00/glog|r to open, |cffffff00/glog stats|r for memory/CPU usage.")
 end
 
 function GuildLog:OnEnable()
@@ -407,6 +618,33 @@ function GuildLog:OnEnable()
     self:RegisterEvent("GUILD_EVENT_LOG_UPDATE", DebouncedScan)
     self:RegisterEvent("PLAYER_GUILD_UPDATE", function()
         C_GuildInfo.GuildRoster()
+    end)
+
+    -- Debounced roster snapshot scan: catches note/rank/membership changes with
+    -- no chat message or Blizzard event-log entry. GUILD_ROSTER_UPDATE fires very
+    -- often (e.g. any guildmate going on/offline), so a short debounce plus the
+    -- ROSTER_SCAN_MIN_INTERVAL gate inside ScanRosterForChanges keep this from
+    -- doing a full roster diff constantly in a large, active guild.
+    local rosterScanTimer = nil
+    local function DebouncedRosterScan()
+        if rosterScanTimer then rosterScanTimer:Cancel() end
+        rosterScanTimer = C_Timer.NewTimer(1, function()
+            rosterScanTimer = nil
+            if time() - lastRosterScanTime >= ROSTER_SCAN_MIN_INTERVAL then
+                ScanRosterForChanges()
+            end
+        end)
+    end
+    self:RegisterEvent("GUILD_ROSTER_UPDATE", DebouncedRosterScan)
+
+    -- Actively request fresh roster data on a timer rather than relying solely
+    -- on Blizzard to push GUILD_ROSTER_UPDATE on its own -- note edits don't
+    -- reliably trigger it, so without this poll a note change made by an
+    -- officer could go undetected for the rest of the session.
+    C_Timer.NewTicker(ROSTER_SCAN_MIN_INTERVAL, function()
+        if IsInGuild() then
+            C_GuildInfo.GuildRoster()
+        end
     end)
 
     -- Request guild event log data from the server on login so
