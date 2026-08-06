@@ -104,7 +104,7 @@ local scrollOffset = 0
 -- instead of cramming everything into one.
 
 local function BuildDisplayLines(entry)
-    local player = ""
+    local player  -- always set below, in every branch
     local lines = {}
 
     if entry.type == "INVITE" then

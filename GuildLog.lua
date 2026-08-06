@@ -342,17 +342,6 @@ local function ScanGuildLog()
     return added
 end
 
--- Forces a full re-scan of Blizzard's guild event log from scratch.
--- Called by the Refresh button, and implicitly after Clear Log.
--- Resets the watermark so ScanGuildLog processes all 20 events on the next
--- GUILD_EVENT_LOG_UPDATE, then requests fresh data from the server.
-function GuildLog.ForceRescan()
-    lastScanSig = nil
-    lastRosterScanTime = 0
-    C_GuildInfo.GuildRoster()
-    QueryGuildEventLog()
-end
-
 -- == Roster snapshot scan =====================================================
 -- Backup detection layer, in the spirit of Guild Roster Manager: periodically
 -- snapshots GetGuildRosterInfo() and diffs it against the previous snapshot.
@@ -366,9 +355,25 @@ end
 -- once because the stored value is updated right after. JOIN/LEAVE/PROMOTE/
 -- DEMOTE backups run through the same IsDuplicate() the live/log paths use so
 -- they don't double up with an event those paths already recorded.
-
+--
+-- Declared here, ahead of ForceRescan below, so ForceRescan's reset of
+-- lastRosterScanTime resolves to this local instead of silently creating an
+-- unrelated global (Lua closures only capture locals already in scope at the
+-- point a function is defined -- ForceRescan used to be defined earlier in
+-- the file, before this declaration existed).
 local ROSTER_SCAN_MIN_INTERVAL = 30  -- seconds between full roster diffs
 local lastRosterScanTime = 0
+
+-- Forces a full re-scan of Blizzard's guild event log from scratch.
+-- Called by the Refresh button, and implicitly after Clear Log.
+-- Resets the watermark so ScanGuildLog processes all 20 events on the next
+-- GUILD_EVENT_LOG_UPDATE, then requests fresh data from the server.
+function GuildLog.ForceRescan()
+    lastScanSig = nil
+    lastRosterScanTime = 0
+    C_GuildInfo.GuildRoster()
+    QueryGuildEventLog()
+end
 
 local function BuildRosterSnapshot()
     local snapshot = {}
