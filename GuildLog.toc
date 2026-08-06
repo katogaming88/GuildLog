@@ -2,10 +2,10 @@
 ## Title: GuildLog
 ## Notes: A clean guild event log with real timestamps and cross-client sync
 ## Author: Katorri
-## Version: 0.4.2
+## Version: 0.5.0
 ## SavedVariables: GuildLogDB
 ## OptionalDeps: Ace3
-## X-Embeds: AceAddon-3.0, AceEvent-3.0, AceComm-3.0, AceSerializer-3.0, AceGUI-3.0
+## X-Embeds: AceAddon-3.0, AceEvent-3.0, AceComm-3.0, AceSerializer-3.0
 
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
@@ -14,8 +14,6 @@ Libs\AceEvent-3.0\AceEvent-3.0.lua
 Libs\AceComm-3.0\ChatThrottleLib.lua
 Libs\AceComm-3.0\AceComm-3.0.lua
 Libs\AceSerializer-3.0\AceSerializer-3.0.lua
-Libs\AceGUI-3.0\AceGUI-3.0.lua
-Libs\AceGUI-3.0\widgets\AceGUIContainer-Frame.lua
 
 GuildLog.lua
 GuildLogUI.lua

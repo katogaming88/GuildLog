@@ -8,6 +8,73 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.5.0] — 2026-08-06 — Katorri
+
+### Fixed
+- Startup duplicate cleanup could silently delete a legitimate NOTE/ONOTE
+  entry: its dedup key was `type/actor/target` only, and every note change
+  for the same player shares that key regardless of old/new text, so two
+  different edits to the same player within an hour looked like duplicates
+  and the older one got dropped. The key now also includes `rank`/`newRank`
+  (the old/new values) so only truly identical entries are treated as dupes.
+
+### Added
+- Roster snapshot scan, similar in spirit to Guild Roster Manager: periodically
+  diffs the full guild roster against the previous snapshot to catch changes
+  the chat-message/event-log paths can miss -- membership or rank changes that
+  happened while nobody with the addon was online, or events that fell off
+  Blizzard's 20-entry event log cap.
+- Public and officer note change tracking (`Note changed`, `Officer note
+  changed` log entries) -- Blizzard exposes no chat message or log event for
+  note edits, so this is the only way GuildLog can see them.
+- "Notes" filter button in the log window for the two new entry types.
+- `/glog stats` -- prints GuildLog's current memory usage, and CPU time if
+  Lua script profiling (`/console scriptProfile 1`) is enabled, for checking
+  the addon isn't a performance drag.
+
+### Changed
+- Reworked the log window layout: rows now render in aligned Time / Event /
+  Player / Details columns instead of one concatenated string, each row gets
+  a left-edge accent bar colored by event type, and the list sits in a
+  bordered panel with a header row for readability. Filter buttons are now
+  colored toggle chips (tinted by event type, dim when off) instead of the
+  stock red action-button skin, so active filters are easier to read at a
+  glance.
+- Entries that carry extra detail (rank changes, note edits) now span two
+  lines -- e.g. a promotion shows "OldRank -> NewRank" on the first line and
+  "by <officer>" dimmed underneath -- instead of cramming everything onto one
+  row, similar to how Guild Roster Manager's log reads.
+- Replaced the AceGUI-3.0 window frame with a hand-built one (custom title
+  bar, close button, and drag/position handling) so the whole window shares
+  one dark/gold theme instead of mixing AceGUI's default chrome with the
+  custom panels inside it. Dropped the now-unused AceGUI-3.0 and
+  AceGUIContainer-Frame libraries from the TOC and `Libs/`.
+- The roster snapshot scan (see above) now also runs on an active 30-second
+  timer that requests fresh roster data, instead of only reacting to
+  `GUILD_ROSTER_UPDATE` firing on its own -- note edits don't reliably
+  trigger that event, so without this a note change could sit undetected
+  for the rest of the session.
+- Invites are no longer logged as their own row. An accepted invite now reads
+  as a single "Joined" line with "Invited by <officer>" as its detail,
+  instead of a separate "Invited" entry plus a "Joined" entry for the same
+  event. The "Invites" filter chip was renamed to "Joins" to match.
+- One-time migration on load merges any INVITE/JOIN pairs already sitting in
+  your saved log from before this change, so existing history reads the same
+  way new entries do. Runs automatically once; harmless no-op afterward.
+- Row text bumped from small to normal-size fonts across the log window for
+  readability, with the window and columns widened to fit. Timestamps now
+  read as `MM/DD/YY hh:mm:ss AM/PM` instead of `YYYY-MM-DD HH:MM:SS`, and the
+  Time column was widened so the new format doesn't clip. Seconds were
+  dropped from the display (`MM/DD/YY hh:mm AM/PM`) as unnecessary precision
+  for a guild log.
+
+### Added
+- `/glog stats` -- prints GuildLog's current memory usage, and CPU time if
+  Lua script profiling (`/console scriptProfile 1`) is enabled, for checking
+  the addon isn't a performance drag.
+
+---
+
 ## [0.4.2] — 2026-06-16 — Katorri
 
 ### Changed
