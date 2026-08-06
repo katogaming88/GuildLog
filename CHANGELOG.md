@@ -10,6 +10,10 @@ Update on every PR. Add your name to the version header line.
 
 ## [0.5.0] — 2026-08-06 — Katorri
 
+### Changed
+- Added 120100 to the TOC interface line for patch 12.1.0 compatibility,
+  alongside the existing 120007 (12.0.7).
+
 ### Fixed
 - Startup duplicate cleanup could silently delete a legitimate NOTE/ONOTE
   entry: its dedup key was `type/actor/target` only, and every note change
