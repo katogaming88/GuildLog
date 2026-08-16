@@ -43,6 +43,7 @@ globals = {
     "C_GuildInfo",
     "C_Timer",
     "UnitName",
+    "GetNormalizedRealmName",
 
     -- WoW global format strings used for pattern building
     "ERR_GUILD_JOIN_S",
