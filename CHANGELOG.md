@@ -8,6 +8,20 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.5.1] — 2026-08-16 — Katorri
+
+### Changed
+- The startup/periodic scans no longer announce themselves in chat every
+  single login ("Startup scan complete -- N new events / no new events"),
+  matching how Guild Roster Manager treats routine scans as silent
+  background work rather than something worth a chat line every time.
+
+### Added
+- `/glog scan` -- forces an immediate rescan (event log + roster) and reports
+  back explicitly ("Scanning..." then "Manual scan complete -- N new entries
+  found"), for on-demand confirmation that scanning is actually working
+  without needing ambient chat spam to infer it.
+
 ## [0.5.0] — 2026-08-06 — Katorri
 
 ### Changed
