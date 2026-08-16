@@ -79,6 +79,26 @@ Update on every PR. Add your name to the version header line.
   (bursts, mergeable duplicates), but the generator was still producing
   fresh churn every scan; run it again after this update lands to clean up
   what already accumulated.
+- Resetting `nameIndex` (see the two entries above) wasn't enough on its own
+  for a short name whose fabricated realm guess had already been written
+  directly into a stored entry's `actor`/`target` field, rather than just
+  living in the index -- the very next `/glog fixup` run would trust that
+  already-suffixed value at face value and re-confirm the bad guess right
+  back into the freshly-reset index. `/glog fixup` now also purges that one
+  specific pattern (a short name on record with both a real realm and one
+  that exactly matches "your own realm," which is the only formula the
+  fabricated guess could have used), rewriting any stored entry still
+  holding the fabricated value.
+- The snapshot-key churn from the `BuildRosterSnapshot` ordering bug above
+  logged a real member as leaving and immediately rejoining, and neither
+  existing cleanup pass could catch it: the burst-removal counts entries
+  sharing one timestamp *per type*, so a churn event split across JOIN and
+  LEAVE could land under the threshold on each type individually even
+  though the mix as a whole was obviously not real membership change; and
+  the phantom-duplicate merge only merges two entries of the *same* type
+  describing one event, not two different types. `/glog fixup` now also
+  cancels a JOIN and a LEAVE for the same player within a 10-minute window
+  as a pair, on top of the existing cleanup passes.
 
 ## [0.6.1] — 2026-08-16 — Katorri
 

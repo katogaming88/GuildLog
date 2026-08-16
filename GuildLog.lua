@@ -899,6 +899,93 @@ local function MergePhantomDuplicates()
     return removed
 end
 
+-- A snapshot-key churn artifact (from the ordering bug BuildRosterSnapshot
+-- had -- see ROSTER_SNAPSHOT_SCHEMA's comment) logs a real member as
+-- leaving and immediately rejoining, even though their actual guild
+-- membership never changed. This can't be caught by BURST_THRESHOLD: that
+-- counts entries sharing one timestamp *per type*, and a churn event splits
+-- across JOIN and LEAVE, so each type on its own can land comfortably under
+-- the threshold while the mix as a whole is obviously not real membership
+-- churn. It also can't be caught by MergePhantomDuplicates above: that only
+-- merges two entries of the *same* type describing the same event (e.g. two
+-- recordings of one promotion) -- a JOIN and a LEAVE are different types by
+-- design. A JOIN and a LEAVE (in either order) for the same MatchKey'd
+-- identity within a short window cancels both out instead.
+local JOIN_LEAVE_CANCEL_WINDOW = 600  -- seconds; comfortably longer than a scan cycle, far shorter than a real leave-then-rejoin
+
+local function CancelSpuriousJoinLeavePairs()
+    local entries = GuildLogDB.entries
+    if #entries < 2 then return 0 end
+    table.sort(entries, function(a, b) return a.timestamp > b.timestamp end)
+
+    local removed = 0
+    local i = 1
+    while i <= #entries do
+        local e = entries[i]
+        local cancelIdx = nil
+        if e.type == "JOIN" or e.type == "LEAVE" then
+            local otherType = (e.type == "JOIN") and "LEAVE" or "JOIN"
+            local key = MatchKey(e.actor)
+            for j = i + 1, #entries do
+                local o = entries[j]
+                if e.timestamp - o.timestamp > JOIN_LEAVE_CANCEL_WINDOW then break end
+                if o.type == otherType and MatchKey(o.actor) == key then
+                    cancelIdx = j
+                    break
+                end
+            end
+        end
+        if cancelIdx then
+            table.remove(entries, cancelIdx)  -- higher index first -- doesn't shift i
+            table.remove(entries, i)
+            removed = removed + 2
+        else
+            i = i + 1
+        end
+    end
+    return removed
+end
+
+-- An early build of ResolveDisplayName's own-realm guess got persisted as if
+-- it were a confirmed sighting (fixed since -- see ROSTER_SNAPSHOT_SCHEMA's
+-- comment), and that guess always used exactly this formula: "<short>-<your
+-- own realm>". An install that ran that build can have a short name on
+-- record with that fabricated value alongside the real one, which reads as
+-- genuine ambiguity and blocks every fix above from merging the player's
+-- entries -- resetting nameIndex alone doesn't help, because a stored entry
+-- can still literally hold the fabricated value in its actor/target field,
+-- and the normal re-resolve pass trusts an already-suffixed value at face
+-- value, re-confirming the bad guess right back into the index.
+-- Deliberately narrow: only ever acts on the one exact fabricated pattern
+-- the known bug could have produced, and only when a *different* value is
+-- also on record to prefer -- never invents or guesses a replacement.
+local function PurgeSuspectOwnRealmGuesses()
+    local ownRealm = GetNormalizedRealmName()
+    if not ownRealm or ownRealm == "" then return 0 end
+    local index = GuildLogDB.nameIndex
+    if not index then return 0 end
+
+    local purged = 0
+    for short, set in pairs(index) do
+        local suspect = short .. "-" .. ownRealm
+        if set[suspect] then
+            local real
+            for full in pairs(set) do
+                if full ~= suspect then real = full break end
+            end
+            if real then
+                set[suspect] = nil
+                purged = purged + 1
+                for _, e in ipairs(GuildLogDB.entries) do
+                    if e.actor  == suspect then e.actor  = real end
+                    if e.target == suspect then e.target = real end
+                end
+            end
+        end
+    end
+    return purged
+end
+
 local function FixCorruptedRosterScanEntries()
     local entries = GuildLogDB.entries
     if #entries == 0 then
@@ -910,6 +997,8 @@ local function FixCorruptedRosterScanEntries()
     -- strongest signal for who's genuinely ambiguous (2+ realms sharing a
     -- short name) before resolving any stored name against it.
     BuildRosterSnapshot()
+
+    local guessesPurged = PurgeSuspectOwnRealmGuesses()
 
     -- Re-resolve every stored name against that index -- entries logged
     -- before the realm-suffix fix may still hold a bare or inconsistent form.
@@ -937,11 +1026,14 @@ local function FixCorruptedRosterScanEntries()
     GuildLogDB.entries = kept
 
     local phantomsMerged = MergePhantomDuplicates()
+    local pairsCancelled = CancelSpuriousJoinLeavePairs()
 
     print(string.format(
-        "|cff00ccff[GuildLog]|r Fixup: normalized names, removed %d corrupted burst %s, merged %d phantom duplicate %s (%d remaining).",
+        "|cff00ccff[GuildLog]|r Fixup: normalized names, purged %d fabricated realm %s, removed %d corrupted burst %s, merged %d phantom duplicate %s, cancelled %d spurious leave+join %s (%d remaining).",
+        guessesPurged, guessesPurged == 1 and "guess" or "guesses",
         burstRemoved, burstRemoved == 1 and "entry" or "entries",
         phantomsMerged, phantomsMerged == 1 and "entry" or "entries",
+        pairsCancelled / 2, pairsCancelled == 2 and "pair" or "pairs",
         #GuildLogDB.entries))
 
     PurgeExistingDuplicates()
