@@ -407,7 +407,20 @@ local function DiffRosterSnapshot(oldSnap, newSnap)
             if new.rankIndex ~= old.rankIndex then
                 -- Lower rankIndex = higher rank in Blizzard's numbering.
                 local evt = (new.rankIndex > old.rankIndex) and EVENT_DEMOTE or EVENT_PROMOTE
-                if not IsDuplicate(evt, "", name, now) then
+                -- The live chat message and Blizzard's event log both only ever
+                -- report the *new* rank -- this snapshot diff is the only path
+                -- that knows the old one, since it's comparing two full rosters.
+                -- The live/log path almost always records its incomplete entry
+                -- first (near-instant vs. this scan's 30s+ gate), so backfill the
+                -- existing entry's rank instead of discarding the one place that
+                -- actually has it -- otherwise every promote/demote shows "?" for
+                -- the old rank permanently.
+                local existing = FindDuplicate(evt, "", name, now)
+                if existing then
+                    if existing.rank == "" and old.rankName ~= "" then
+                        existing.rank = old.rankName
+                    end
+                else
                     AddEntry(evt, "", name, old.rankName, new.rankName, now)
                 end
             end

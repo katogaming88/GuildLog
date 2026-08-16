@@ -8,6 +8,21 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.6.1] — 2026-08-16 — Katorri
+
+### Fixed
+- Promotions/demotions almost always showed "?" for the old rank instead of
+  the real one. The live chat message and Blizzard's event log both only
+  ever report the *new* rank -- the roster-snapshot scan is the only path
+  that knows the old one, since it's comparing two full rosters. Because the
+  live/log path detects a promotion almost instantly while the snapshot scan
+  is gated to run at most every 30s, the incomplete entry (old rank unknown)
+  nearly always landed first; when the snapshot scan later found the same
+  promotion with the real old rank, it was silently discarded as an already-
+  seen duplicate instead of backfilling it in. The snapshot diff now
+  backfills the existing entry's old rank instead of discarding the one
+  place that actually has it.
+
 ## [0.6.0] — 2026-08-16 — Katorri
 
 ### Added
