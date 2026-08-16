@@ -32,6 +32,22 @@ Update on every PR. Add your name to the version header line.
   from (shown as "?"). Names are now normalized to their short form (no realm
   suffix) everywhere they're used as a key or compared.
 
+### Added
+- `/glog fixup` -- a one-time recovery command for logs already corrupted by
+  the two bugs above. The partial-snapshot bug could snowball: a partial
+  roster diffed against a full snapshot logs a burst of bogus LEAVEs, that
+  partial snapshot then gets saved as the new baseline, and the next scan
+  (still mid-load) diffs against *that*, producing another bogus burst -- on
+  an affected account this inflated a log that should hold a few thousand
+  entries to over 19,000. `/glog fixup` re-normalizes every stored name,
+  strips out bursts of 15+ same-type entries sharing one timestamp (the
+  signature of a corrupted scan -- real guilds don't have that many genuine
+  joins/leaves/promotes/note-changes land in the same second), and merges
+  leftover duplicate pairs left by the realm-suffix bug, backfilling
+  whichever fields each copy is missing. Opt-in only, since the burst
+  threshold is a judgment call about already-corrupted data rather than
+  something to apply silently.
+
 ## [0.5.0] — 2026-08-06 — Katorri
 
 ### Changed

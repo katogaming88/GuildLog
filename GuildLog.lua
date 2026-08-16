@@ -574,6 +574,127 @@ local function MergeStoredInvites()
     end
 end
 
+-- == Roster-scan corruption recovery =========================================
+-- Recovery for logs corrupted by the two roster-snapshot-scan bugs above: a
+-- partial snapshot diffed mid-load could snowball into repeated storms of
+-- JOIN/LEAVE (and PROMOTE/DEMOTE/NOTE/ONOTE) entries every ~30s while the
+-- roster was still loading, and realm-suffix inconsistency could split one
+-- player into two "different" people. Both are now fixed going forward (see
+-- ScanRosterForChanges and NormalizeName), but existing saved logs can still
+-- be carrying thousands of bogus entries from before the fix.
+--
+-- Not run automatically -- the burst threshold below is a judgment call about
+-- data that's already corrupted, not something to apply silently. Opt in via
+-- "/glog fixup".
+--
+-- BURST_THRESHOLD: entries sharing the same timestamp+type are treated as a
+-- corrupted-scan burst once there are this many. A real guild essentially
+-- never has 15+ genuine joins/leaves/promotes/note-changes land in the same
+-- second; that pattern is the signature of a partial snapshot getting diffed
+-- against a full one. Chosen from an actual corrupted log where genuine
+-- clusters (deliberate multi-kick, etc.) topped out at 12 while corrupted
+-- bursts started at 19 and ran into the hundreds -- comfortably clear of the
+-- legitimate range on both sides.
+local BURST_THRESHOLD = 15
+
+-- Types whose live/log/roster-scan paths can each record the same real-world
+-- event with different actor/target completeness (see IsDuplicate's callers).
+-- NOTE/ONOTE are deliberately excluded: those don't go through IsDuplicate
+-- when first recorded, so two different edits to the same player can
+-- legitimately share an empty target within the window and must not merge.
+local MERGEABLE_TYPES = {
+    JOIN = true, LEAVE = true, REMOVE = true, PROMOTE = true, DEMOTE = true,
+}
+
+-- Collapses leftover pairs like the Tt / Tt-Detheroc case: the same event
+-- recorded twice under what used to be two different-looking names, one copy
+-- knowing more (actor, old rank) than the other. Mirrors FindDuplicate's
+-- wildcard actor/target matching, but sweeps the whole log instead of
+-- checking one new entry against history, and backfills whichever fields the
+-- surviving entry is missing before dropping the redundant copy.
+local function MergePhantomDuplicates()
+    local entries = GuildLogDB.entries
+    if #entries < 2 then return 0 end
+
+    table.sort(entries, function(a, b) return a.timestamp > b.timestamp end)
+
+    local removed = 0
+    local i = 1
+    while i <= #entries do
+        local e = entries[i]
+        local dupIdx = nil
+        if MERGEABLE_TYPES[e.type] then
+            for j = i + 1, #entries do
+                local o = entries[j]
+                if e.timestamp - o.timestamp > DEDUP_WINDOW then break end
+                if o.type == e.type
+                   and (o.actor  == e.actor  or o.actor  == "" or e.actor  == "")
+                   and (o.target == e.target or o.target == "" or e.target == "") then
+                    dupIdx = j
+                    break
+                end
+            end
+        end
+        if dupIdx then
+            local kept = entries[dupIdx]
+            if kept.actor   == "" and e.actor   ~= "" then kept.actor   = e.actor   end
+            if kept.target  == "" and e.target  ~= "" then kept.target  = e.target  end
+            if kept.rank    == "" and e.rank    ~= "" then kept.rank    = e.rank    end
+            if kept.newRank == "" and e.newRank ~= "" then kept.newRank = e.newRank end
+            table.remove(entries, i)
+            removed = removed + 1
+            -- Don't advance i -- the next entry has shifted into this slot.
+        else
+            i = i + 1
+        end
+    end
+    return removed
+end
+
+local function FixCorruptedRosterScanEntries()
+    local entries = GuildLogDB.entries
+    if #entries == 0 then
+        print("|cff00ccff[GuildLog]|r No entries to clean up.")
+        return
+    end
+
+    -- Re-normalize every stored name -- entries logged before the realm-suffix
+    -- fix may still hold the raw "-Realm" form.
+    for _, e in ipairs(entries) do
+        e.actor  = NormalizeName(e.actor)  or ""
+        e.target = NormalizeName(e.target) or ""
+    end
+
+    local counts = {}
+    for _, e in ipairs(entries) do
+        local key = e.timestamp .. "\1" .. e.type
+        counts[key] = (counts[key] or 0) + 1
+    end
+
+    local kept = {}
+    local burstRemoved = 0
+    for _, e in ipairs(entries) do
+        local key = e.timestamp .. "\1" .. e.type
+        if counts[key] >= BURST_THRESHOLD then
+            burstRemoved = burstRemoved + 1
+        else
+            kept[#kept + 1] = e
+        end
+    end
+    GuildLogDB.entries = kept
+
+    local phantomsMerged = MergePhantomDuplicates()
+
+    print(string.format(
+        "|cff00ccff[GuildLog]|r Fixup: normalized names, removed %d corrupted burst %s, merged %d phantom duplicate %s (%d remaining).",
+        burstRemoved, burstRemoved == 1 and "entry" or "entries",
+        phantomsMerged, phantomsMerged == 1 and "entry" or "entries",
+        #GuildLogDB.entries))
+
+    PurgeExistingDuplicates()
+    MergeStoredInvites()
+end
+
 -- == AceAddon lifecycle =======================================================
 
 function GuildLog:OnInitialize()
@@ -593,6 +714,8 @@ function GuildLog:OnInitialize()
             print("|cff00ccff[GuildLog]|r Log cleared.")
         elseif msg == "debug" then
             print("|cff00ccff[GuildLog]|r Entries stored: " .. #GuildLogDB.entries)
+        elseif msg == "fixup" then
+            FixCorruptedRosterScanEntries()
         elseif msg == "stats" then
             UpdateAddOnMemoryUsage()
             local memKB = GetAddOnMemoryUsage("GuildLog")
@@ -613,7 +736,7 @@ function GuildLog:OnInitialize()
         end
     end
 
-    print("|cff00ccff[GuildLog]|r Loaded. Type |cffffff00/glog|r to open, |cffffff00/glog stats|r for memory/CPU usage.")
+    print("|cff00ccff[GuildLog]|r Loaded. Type |cffffff00/glog|r to open, |cffffff00/glog stats|r for memory/CPU usage, |cffffff00/glog fixup|r to clean up entries from the roster-scan bug.")
 end
 
 function GuildLog:OnEnable()
