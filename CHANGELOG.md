@@ -8,6 +8,19 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.5.1] — 2026-08-16 — Katorri
+
+### Fixed
+- Roster snapshot scan could log every guild member as having left at once.
+  For large guilds, Blizzard streams member details in over several
+  `GUILD_ROSTER_UPDATE` events rather than delivering them all at once;
+  `GetNumGuildMembers()` reports the final count immediately, but
+  `GetGuildRosterInfo()` can still return a nil name for slots that haven't
+  loaded yet. The snapshot scan would silently skip those unresolved slots,
+  diff the resulting partial roster against the last full snapshot, and log
+  every member missing from the partial snapshot as a LEAVE. The scan now
+  waits until every roster slot has resolved a name before diffing.
+
 ## [0.5.0] — 2026-08-06 — Katorri
 
 ### Changed

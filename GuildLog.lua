@@ -375,8 +375,12 @@ function GuildLog.ForceRescan()
     QueryGuildEventLog()
 end
 
+-- Returns the snapshot plus how many roster slots Blizzard reports total, so
+-- callers can tell a genuinely small guild apart from a big one whose member
+-- details just haven't streamed in yet (see ScanRosterForChanges).
 local function BuildRosterSnapshot()
     local snapshot = {}
+    local resolved = 0
     local count = GetNumGuildMembers()
     for i = 1, count do
         local name, rankName, rankIndex, level, _, _, note, officerNote = GetGuildRosterInfo(i)
@@ -388,9 +392,10 @@ local function BuildRosterSnapshot()
                 note        = note      or "",
                 officerNote = officerNote or "",
             }
+            resolved = resolved + 1
         end
     end
-    return snapshot
+    return snapshot, resolved, count
 end
 
 local function DiffRosterSnapshot(oldSnap, newSnap)
@@ -434,8 +439,17 @@ end
 -- server data should request it separately.
 local function ScanRosterForChanges()
     if not GuildLogDB or not IsInGuild() then return end
-    local newSnap = BuildRosterSnapshot()
+    local newSnap, resolved, expectedCount = BuildRosterSnapshot()
     if next(newSnap) == nil then return end  -- roster not populated yet
+
+    -- Blizzard streams member details in over several GUILD_ROSTER_UPDATE
+    -- events for large guilds -- GetNumGuildMembers() is available immediately,
+    -- but GetGuildRosterInfo() can still return nil names for slots that
+    -- haven't loaded yet, leaving newSnap smaller than the real roster. Diffing
+    -- a partial snapshot against a full previous one would log everyone still
+    -- missing as having left. Wait for the next scan instead of overwriting the
+    -- stored snapshot with incomplete data.
+    if resolved < expectedCount then return end
 
     DiffRosterSnapshot(GuildLogDB.rosterSnapshot, newSnap)
     GuildLogDB.rosterSnapshot = newSnap
