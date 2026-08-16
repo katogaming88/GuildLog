@@ -20,6 +20,17 @@ Update on every PR. Add your name to the version header line.
   diff the resulting partial roster against the last full snapshot, and log
   every member missing from the partial snapshot as a LEAVE. The scan now
   waits until every roster slot has resolved a name before diffing.
+- The same player could be logged as two different people. Blizzard only
+  appends a "-Realm" suffix to a name when needed to disambiguate a naming
+  collision in the connected-realm cluster, and that disambiguation can flip
+  on/off for the same person mid-session; `GetGuildRosterInfo()`,
+  `GetGuildEventInfo()`, and `CHAT_MSG_SYSTEM` text didn't always agree on
+  which form they returned at a given moment. Since names were used as-is for
+  roster-snapshot keys and duplicate-detection matching, a suffix flip made
+  the same player look like two different people -- producing a spurious
+  extra "Joined"/"Promoted" row with no prior record to read the old rank
+  from (shown as "?"). Names are now normalized to their short form (no realm
+  suffix) everywhere they're used as a key or compared.
 
 ## [0.5.0] — 2026-08-06 — Katorri
 

@@ -9,6 +9,19 @@ GuildLog.MAX_ENTRIES = 0  -- 0 = unlimited
 local COMM_PREFIX = "GuildLog"  -- must be <=16 chars
 local SYNC_DELAY  = 5           -- seconds after login before requesting catch-up
 
+-- Blizzard only appends "-Realm" to a name when it's needed to disambiguate
+-- (e.g. a same-named character elsewhere in the connected-realm cluster
+-- becomes visible), and that ambiguity can flip on/off for the same person
+-- within a single session. GetGuildRosterInfo(), GetGuildEventInfo(), and
+-- CHAT_MSG_SYSTEM text don't always agree on which form they hand back at any
+-- given moment. Every name is normalized to its short form (no realm suffix)
+-- before it's used as a key or compared, so the same player can't look like
+-- two different people just because the suffix appeared or disappeared.
+local function NormalizeName(name)
+    if not name or name == "" then return name end
+    return name:match("^([^%-]+)") or name
+end
+
 -- == Event type constants =====================================================
 
 local EVENT_INVITE  = "INVITE"
@@ -66,8 +79,8 @@ local DEDUP_WINDOW = 7200
 -- Returns the matching entry (or nil), so callers can also use it to backfill
 -- a field discovered later -- see the JOIN inviter backfill in ScanGuildLog.
 local function FindDuplicate(ourType, actor, target, approxTime)
-    actor  = actor  or ""
-    target = target or ""
+    actor  = NormalizeName(actor)  or ""
+    target = NormalizeName(target) or ""
     for _, e in ipairs(GuildLogDB.entries) do
         if e.timestamp < approxTime - DEDUP_WINDOW then break end
         if e.type   == ourType
@@ -102,8 +115,8 @@ local function AddEntry(entryType, actor, target, rank, newRank, timestamp)
     local entry = {
         timestamp = timestamp or time(),
         type      = entryType,
-        actor     = actor   or "",
-        target    = target  or "",
+        actor     = NormalizeName(actor)  or "",
+        target    = NormalizeName(target) or "",
         rank      = rank    or "",
         newRank   = newRank or "",
     }
@@ -169,11 +182,8 @@ local function FindMemberRank(name)
     local count = GetNumGuildMembers()
     for i = 1, count do
         local fullName, rankName = GetGuildRosterInfo(i)
-        if fullName then
-            local shortName = fullName:match("^([^%-]+)")
-            if shortName == name or fullName == name then
-                return rankName or ""
-            end
+        if fullName and NormalizeName(fullName) == name then
+            return rankName or ""
         end
     end
     return ""
@@ -191,7 +201,7 @@ local function HandleLiveGuildEvent(_, message)
     local now = time()
 
     if message:find("joined the guild.", 1, true) then
-        local name = message:match(pat_join)
+        local name = NormalizeName(message:match(pat_join))
         if not name then return end
         C_GuildInfo.GuildRoster()
         QueryGuildEventLog()
@@ -283,6 +293,8 @@ local function ScanGuildLog()
 
     for i = startFrom, 1, -1 do
         local eventType, player1, player2, rankName, year, month, day, hour = GetGuildEventInfo(i)
+        player1 = NormalizeName(player1)
+        player2 = NormalizeName(player2)
         local ourType = eventType and BLIZZARD_TO_EVENT[eventType]
         if ourType then
             -- WoW logs two entries per invite+accept: one "invite" with player2=invitee
@@ -384,6 +396,7 @@ local function BuildRosterSnapshot()
     local count = GetNumGuildMembers()
     for i = 1, count do
         local name, rankName, rankIndex, level, _, _, note, officerNote = GetGuildRosterInfo(i)
+        name = NormalizeName(name)
         if name and name ~= "" then
             snapshot[name] = {
                 rankName    = rankName  or "",
