@@ -533,17 +533,27 @@ local ROSTER_SCAN_MIN_INTERVAL = 30  -- seconds between full roster diffs
 local lastRosterScanTime = 0
 
 -- Bump whenever the snapshot's dict-key scheme changes (see MatchKey/
--- BuildRosterSnapshot). GuildLogDB.rosterSnapshot persists across sessions,
--- so a stored snapshot keyed under an old scheme would look completely
--- unrecognizable to a diff using the new one -- every current member's new
--- key is missing from the old snapshot and vice versa, which reads as the
--- entire guild leaving and rejoining at once. DiscardStaleRosterSnapshot()
--- (called from OnInitialize) drops the stored snapshot instead of diffing
--- against it whenever this doesn't match what's saved, so the next scan
--- quietly re-establishes a baseline (same as a genuinely first-ever
+-- BuildRosterSnapshot) OR nameIndex's semantics change. GuildLogDB.rosterSnapshot
+-- persists across sessions, so a stored snapshot keyed under an old scheme
+-- would look completely unrecognizable to a diff using the new one -- every
+-- current member's new key is missing from the old snapshot and vice versa,
+-- which reads as the entire guild leaving and rejoining at once.
+-- GuildLogDB.nameIndex has the same problem in a subtler form: an early
+-- version of ResolveDisplayName's own-realm guess was persisted as if it
+-- were a confirmed sighting, so an install that ran that version can have a
+-- short name on record with a bogus second "realm" alongside the real one.
+-- That reads as genuine ambiguity (2+ confirmed realms), and MatchKey
+-- resolves an already-suffixed input differently from a bare one under
+-- ambiguity (trusts the former as-is, falls back to short for the latter) --
+-- so the same player's bare and suffixed mentions stop matching each other,
+-- and /glog fixup's merge pass can't recognize them as the same event.
+-- DiscardStaleRosterState() (called from OnInitialize) drops both instead of
+-- using them whenever this doesn't match what's saved, so the next scan
+-- quietly re-establishes a clean baseline (same as a genuinely first-ever
 -- snapshot -- DiffRosterSnapshot's `if not oldSnap` guard logs nothing for
--- it) instead of logging the whole roster as fresh joins.
-local ROSTER_SNAPSHOT_SCHEMA = 2
+-- it) instead of logging the whole roster as fresh joins, and nameIndex
+-- rebuilds from only-ever-confirmed sightings going forward.
+local ROSTER_SNAPSHOT_SCHEMA = 3
 
 -- Forces a full re-scan of Blizzard's guild event log from scratch.
 -- Called by the Refresh button, and implicitly after Clear Log.
@@ -766,9 +776,10 @@ end
 
 -- One-time-per-load migration: see ROSTER_SNAPSHOT_SCHEMA's comment. Safe to
 -- run every load -- a no-op once GuildLogDB.rosterSnapshotSchema matches.
-local function DiscardStaleRosterSnapshot()
+local function DiscardStaleRosterState()
     if GuildLogDB.rosterSnapshotSchema ~= ROSTER_SNAPSHOT_SCHEMA then
         GuildLogDB.rosterSnapshot = nil
+        GuildLogDB.nameIndex = nil
         GuildLogDB.rosterSnapshotSchema = ROSTER_SNAPSHOT_SCHEMA
     end
 end
@@ -914,7 +925,7 @@ function GuildLog:OnInitialize()
     GuildLogDB.entries = GuildLogDB.entries or {}
     PurgeExistingDuplicates()
     MergeStoredInvites()
-    DiscardStaleRosterSnapshot()
+    DiscardStaleRosterState()
 
     self:RegisterComm(COMM_PREFIX)
 

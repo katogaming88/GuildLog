@@ -48,6 +48,17 @@ Update on every PR. Add your name to the version header line.
   stored snapshot; a mismatch discards it instead of diffing against it, so
   the next scan quietly re-establishes a baseline (same as a genuinely
   first-ever snapshot) instead of logging the whole roster as fresh joins.
+- An earlier version of `ResolveDisplayName()`'s own-realm guess (before it
+  was fixed to stop doing this) could get persisted into `nameIndex` as if
+  it were a confirmed sighting, leaving some installs with a bogus second
+  "realm" on record for a short name alongside the real one. That reads as
+  genuine ambiguity, and `MatchKey()` resolves an already-suffixed input
+  differently from a bare one under ambiguity (trusts the former as-is,
+  falls back to short for the latter) -- so a player's bare and suffixed
+  mentions stopped matching each other, and `/glog fixup`'s merge pass
+  couldn't recognize them as the same event even after the fixes above.
+  The same schema version now also discards `nameIndex` when it changes, so
+  it rebuilds from only-ever-confirmed sightings.
   If your log already picked up one of these bursts, `/glog fixup` cleans
   it up the same way it handles the other burst patterns.
 
