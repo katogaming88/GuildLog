@@ -8,6 +8,71 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.6.1] — 2026-08-16 — Katorri
+
+### Changed
+- The startup/periodic scans no longer announce themselves in chat every
+  single login ("Startup scan complete -- N new events / no new events"),
+  matching how Guild Roster Manager treats routine scans as silent
+  background work rather than something worth a chat line every time.
+
+### Fixed
+- Roster snapshot scan could log every guild member as having left at once.
+  For large guilds, Blizzard streams member details in over several
+  `GUILD_ROSTER_UPDATE` events rather than delivering them all at once;
+  `GetNumGuildMembers()` reports the final count immediately, but
+  `GetGuildRosterInfo()` can still return a nil name for slots that haven't
+  loaded yet. The snapshot scan would silently skip those unresolved slots,
+  diff the resulting partial roster against the last full snapshot, and log
+  every member missing from the partial snapshot as a LEAVE. The scan now
+  waits until every roster slot has resolved a name before diffing.
+- The same player could be logged as two different people. Blizzard only
+  appends a "-Realm" suffix to a name when needed to disambiguate, and
+  `GetGuildRosterInfo()`, `GetGuildEventInfo()`, and `CHAT_MSG_SYSTEM` text
+  didn't always agree on whether a given moment counted as ambiguous. Since
+  names were used as-is for roster-snapshot keys and duplicate-detection
+  matching, that disagreement made the same player look like two different
+  people -- producing a spurious extra "Joined"/"Promoted" row with no prior
+  record to read the old rank from (shown as "?"). Every name is now resolved
+  through a realm index before it's stored, matched, or displayed: a
+  realm-qualified name is always trusted and remembered, a bare name is
+  upgraded to the one realm-qualified form on record for it, and a short name
+  genuinely shared by two different guildmates across realms (e.g. the same
+  name on two different connected realms) is left alone rather than guessed
+  at -- so two real players are never silently merged into one, and the
+  realm is still shown wherever it's known.
+- Promotions/demotions almost always showed "?" for the old rank instead of
+  the real one. The live chat message and Blizzard's event log both only
+  ever report the *new* rank -- the roster-snapshot scan is the only path
+  that knows the old one, since it's comparing two full rosters. Because the
+  live/log path detects a promotion almost instantly while the snapshot scan
+  is gated to run at most every 30s, the incomplete entry (old rank unknown)
+  nearly always landed first; when the snapshot scan later found the same
+  promotion with the real old rank, it was silently discarded as an already-
+  seen duplicate instead of backfilling it in. The snapshot diff now
+  backfills the existing entry's old rank instead of discarding the one
+  place that actually has it.
+
+### Added
+- `/glog fixup` -- a one-time recovery command for logs already corrupted by
+  the two bugs above. The partial-snapshot bug could snowball: a partial
+  roster diffed against a full snapshot logs a burst of bogus LEAVEs, that
+  partial snapshot then gets saved as the new baseline, and the next scan
+  (still mid-load) diffs against *that*, producing another bogus burst -- on
+  an affected account this inflated a log that should hold a few thousand
+  entries to over 19,000. `/glog fixup` re-resolves every stored name against
+  the realm index, strips out bursts of 15+ same-type entries sharing one
+  timestamp (the signature of a corrupted scan -- real guilds don't have that
+  many genuine joins/leaves/promotes/note-changes land in the same second),
+  and merges leftover duplicate pairs left by the realm-suffix bug,
+  backfilling whichever fields each copy is missing. Opt-in only, since the
+  burst threshold is a judgment call about already-corrupted data rather than
+  something to apply silently.
+- `/glog scan` -- forces an immediate rescan (event log + roster) and reports
+  back explicitly ("Scanning..." then "Manual scan complete -- N new entries
+  found"), for on-demand confirmation that scanning is actually working
+  without needing ambient chat spam to infer it.
+
 ## [0.6.0] — 2026-08-16 — Katorri
 
 ### Added
