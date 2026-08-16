@@ -73,6 +73,7 @@ globals = {
 
     -- WoW input state
     "IsShiftKeyDown",
+    "GetCursorPosition",
 
     -- WoW shared font templates
     "GameFontDisable",
