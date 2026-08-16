@@ -9,17 +9,78 @@ GuildLog.MAX_ENTRIES = 0  -- 0 = unlimited
 local COMM_PREFIX = "GuildLog"  -- must be <=16 chars
 local SYNC_DELAY  = 5           -- seconds after login before requesting catch-up
 
--- Blizzard only appends "-Realm" to a name when it's needed to disambiguate
--- (e.g. a same-named character elsewhere in the connected-realm cluster
--- becomes visible), and that ambiguity can flip on/off for the same person
--- within a single session. GetGuildRosterInfo(), GetGuildEventInfo(), and
--- CHAT_MSG_SYSTEM text don't always agree on which form they hand back at any
--- given moment. Every name is normalized to its short form (no realm suffix)
--- before it's used as a key or compared, so the same player can't look like
--- two different people just because the suffix appeared or disappeared.
-local function NormalizeName(name)
+-- Blizzard only appends "-Realm" to a name when it's needed to disambiguate,
+-- and GetGuildRosterInfo(), GetGuildEventInfo(), and CHAT_MSG_SYSTEM text
+-- don't always agree on whether a given moment counts as ambiguous. That's a
+-- real problem for two different reasons that pull in opposite directions:
+--   1. The same player can look like two different people if one source
+--      hands back "Tt" and another hands back "Tt-Detheroc" for them.
+--   2. Two different players *can* legitimately share a short name across
+--      realms (e.g. "Katorri-Stormrage" and "Katorri-Medivh" in the same
+--      guild) -- collapsing both down to bare "Katorri" would merge two
+--      real people into one.
+-- The fix for (1) must never cause (2). So nothing is ever matched or stored
+-- by short name alone. Instead, nameIndex[short] tracks every realm-qualified
+-- form actually seen for that short name. A bare name only gets upgraded to
+-- a full one when exactly one realm has ever been seen for it -- genuine
+-- ambiguity (2+ realms on record) leaves it bare rather than guessing, since
+-- a wrong guess silently misattributes one player's event to another.
+local function ShortName(name)
     if not name or name == "" then return name end
     return name:match("^([^%-]+)") or name
+end
+
+-- Remembers the realm-qualified form of a name whenever one is seen.
+local function RememberDisplayName(name)
+    if not GuildLogDB or not name or name == "" then return end
+    local short = ShortName(name)
+    if name ~= short then
+        GuildLogDB.nameIndex = GuildLogDB.nameIndex or {}
+        local set = GuildLogDB.nameIndex[short]
+        if not set then
+            set = {}
+            GuildLogDB.nameIndex[short] = set
+        end
+        set[name] = true
+    end
+end
+
+-- Turns any name (bare or realm-qualified) into the best realm-qualified form
+-- available, for storage/display and for matching. A realm-qualified input is
+-- always trusted as-is (that source explicitly disambiguated). A bare input
+-- is upgraded to the one realm-qualified form on record for it, if there's
+-- only one; genuinely ambiguous short names (2+ realms on record) are left
+-- bare rather than guessed. A short name never before seen with a realm
+-- defaults to the player's own realm, since Blizzard only omits the suffix
+-- when there's no ambiguity to resolve, which in practice means "shares your
+-- realm" for the overwhelming majority of guildmates it applies to.
+local function ResolveDisplayName(name)
+    if not name or name == "" then return name end
+    local short = ShortName(name)
+    if name ~= short then
+        RememberDisplayName(name)
+        return name
+    end
+
+    local set = GuildLogDB and GuildLogDB.nameIndex and GuildLogDB.nameIndex[short]
+    if set then
+        local only, count = nil, 0
+        for full in pairs(set) do
+            only = full
+            count = count + 1
+            if count > 1 then break end
+        end
+        if count == 1 then return only end
+        if count > 1 then return short end  -- genuinely ambiguous -- don't guess
+    end
+
+    local realm = GetNormalizedRealmName()
+    if realm and realm ~= "" then
+        local full = short .. "-" .. realm
+        RememberDisplayName(full)
+        return full
+    end
+    return short
 end
 
 -- == Event type constants =====================================================
@@ -79,8 +140,13 @@ local DEDUP_WINDOW = 7200
 -- Returns the matching entry (or nil), so callers can also use it to backfill
 -- a field discovered later -- see the JOIN inviter backfill in ScanGuildLog.
 local function FindDuplicate(ourType, actor, target, approxTime)
-    actor  = NormalizeName(actor)  or ""
-    target = NormalizeName(target) or ""
+    -- Resolve before comparing, not strip: stored entries already hold their
+    -- resolved (realm-qualified when known) form, so an unresolved incoming
+    -- name has to go through the same resolution to compare like-for-like --
+    -- comparing by short name alone would conflate two different players who
+    -- happen to share one across realms.
+    actor  = ResolveDisplayName(actor)  or ""
+    target = ResolveDisplayName(target) or ""
     for _, e in ipairs(GuildLogDB.entries) do
         if e.timestamp < approxTime - DEDUP_WINDOW then break end
         if e.type   == ourType
@@ -115,8 +181,8 @@ local function AddEntry(entryType, actor, target, rank, newRank, timestamp)
     local entry = {
         timestamp = timestamp or time(),
         type      = entryType,
-        actor     = NormalizeName(actor)  or "",
-        target    = NormalizeName(target) or "",
+        actor     = ResolveDisplayName(actor)  or "",
+        target    = ResolveDisplayName(target) or "",
         rank      = rank    or "",
         newRank   = newRank or "",
     }
@@ -179,10 +245,11 @@ end
 
 -- Scan the roster for a joining member's rank (~1 s after join to let roster update).
 local function FindMemberRank(name)
+    local resolvedName = ResolveDisplayName(name)
     local count = GetNumGuildMembers()
     for i = 1, count do
         local fullName, rankName = GetGuildRosterInfo(i)
-        if fullName and NormalizeName(fullName) == name then
+        if fullName and ResolveDisplayName(fullName) == resolvedName then
             return rankName or ""
         end
     end
@@ -201,7 +268,7 @@ local function HandleLiveGuildEvent(_, message)
     local now = time()
 
     if message:find("joined the guild.", 1, true) then
-        local name = NormalizeName(message:match(pat_join))
+        local name = message:match(pat_join)
         if not name then return end
         C_GuildInfo.GuildRoster()
         QueryGuildEventLog()
@@ -293,8 +360,6 @@ local function ScanGuildLog()
 
     for i = startFrom, 1, -1 do
         local eventType, player1, player2, rankName, year, month, day, hour = GetGuildEventInfo(i)
-        player1 = NormalizeName(player1)
-        player2 = NormalizeName(player2)
         local ourType = eventType and BLIZZARD_TO_EVENT[eventType]
         if ourType then
             -- WoW logs two entries per invite+accept: one "invite" with player2=invitee
@@ -305,7 +370,7 @@ local function ScanGuildLog()
                       or (ourType == EVENT_LEAVE  and (player1 == nil or player1 == ""))
 
             if ourType == EVENT_INVITE and not skip then
-                pendingInviters[player2] = player1
+                pendingInviters[ResolveDisplayName(player2)] = player1
                 skip = true  -- never logged on its own; folded into the join below
             end
 
@@ -323,8 +388,9 @@ local function ScanGuildLog()
 
                 local invitedBy = ""
                 if ourType == EVENT_JOIN then
-                    invitedBy = pendingInviters[player1] or ""
-                    pendingInviters[player1] = nil
+                    local key = ResolveDisplayName(player1)
+                    invitedBy = pendingInviters[key] or ""
+                    pendingInviters[key] = nil
                 end
                 local target = (ourType == EVENT_JOIN) and invitedBy or player2
 
@@ -396,8 +462,12 @@ local function BuildRosterSnapshot()
     local count = GetNumGuildMembers()
     for i = 1, count do
         local name, rankName, rankIndex, level, _, _, note, officerNote = GetGuildRosterInfo(i)
-        name = NormalizeName(name)
         if name and name ~= "" then
+            -- The roster is the strongest signal available for a name's real
+            -- realm -- resolving here (not just short-keying) means two
+            -- different players who share a short name across realms get
+            -- distinct snapshot entries instead of colliding into one.
+            name = ResolveDisplayName(name)
             snapshot[name] = {
                 rankName    = rankName  or "",
                 rankIndex   = rankIndex or 0,
@@ -580,8 +650,8 @@ end
 -- JOIN/LEAVE (and PROMOTE/DEMOTE/NOTE/ONOTE) entries every ~30s while the
 -- roster was still loading, and realm-suffix inconsistency could split one
 -- player into two "different" people. Both are now fixed going forward (see
--- ScanRosterForChanges and NormalizeName), but existing saved logs can still
--- be carrying thousands of bogus entries from before the fix.
+-- ScanRosterForChanges and ResolveDisplayName), but existing saved logs can
+-- still be carrying thousands of bogus entries from before the fix.
 --
 -- Not run automatically -- the burst threshold below is a judgment call about
 -- data that's already corrupted, not something to apply silently. Opt in via
@@ -658,11 +728,16 @@ local function FixCorruptedRosterScanEntries()
         return
     end
 
-    -- Re-normalize every stored name -- entries logged before the realm-suffix
-    -- fix may still hold the raw "-Realm" form.
+    -- Seed the ambiguity index from the live roster first -- it's the
+    -- strongest signal for who's genuinely ambiguous (2+ realms sharing a
+    -- short name) before resolving any stored name against it.
+    BuildRosterSnapshot()
+
+    -- Re-resolve every stored name against that index -- entries logged
+    -- before the realm-suffix fix may still hold a bare or inconsistent form.
     for _, e in ipairs(entries) do
-        e.actor  = NormalizeName(e.actor)  or ""
-        e.target = NormalizeName(e.target) or ""
+        e.actor  = ResolveDisplayName(e.actor)  or ""
+        e.target = ResolveDisplayName(e.target) or ""
     end
 
     local counts = {}
