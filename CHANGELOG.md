@@ -10,6 +10,12 @@ Update on every PR. Add your name to the version header line.
 
 ## [0.6.1] — 2026-08-16 — Katorri
 
+### Changed
+- The startup/periodic scans no longer announce themselves in chat every
+  single login ("Startup scan complete -- N new events / no new events"),
+  matching how Guild Roster Manager treats routine scans as silent
+  background work rather than something worth a chat line every time.
+
 ### Fixed
 - Roster snapshot scan could log every guild member as having left at once.
   For large guilds, Blizzard streams member details in over several
@@ -62,6 +68,10 @@ Update on every PR. Add your name to the version header line.
   backfilling whichever fields each copy is missing. Opt-in only, since the
   burst threshold is a judgment call about already-corrupted data rather than
   something to apply silently.
+- `/glog scan` -- forces an immediate rescan (event log + roster) and reports
+  back explicitly ("Scanning..." then "Manual scan complete -- N new entries
+  found"), for on-demand confirmation that scanning is actually working
+  without needing ambient chat spam to infer it.
 
 ## [0.6.0] — 2026-08-16 — Katorri
 

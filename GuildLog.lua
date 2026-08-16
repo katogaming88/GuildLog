@@ -804,6 +804,26 @@ function GuildLog:OnInitialize()
             print("|cff00ccff[GuildLog]|r Entries stored: " .. #GuildLogDB.entries)
         elseif msg == "fixup" then
             FixCorruptedRosterScanEntries()
+        elseif msg == "scan" then
+            local before = #GuildLogDB.entries
+            print("|cff00ccff[GuildLog]|r Scanning...")
+            GuildLog.ForceRescan()
+            -- Both the event-log scan (0.5s debounce) and the roster-diff scan
+            -- (1s debounce) run async off the GUILD_EVENT_LOG_UPDATE/
+            -- GUILD_ROSTER_UPDATE events ForceRescan triggers; comparing the
+            -- entry count before/after a window wide enough for both to land is
+            -- simpler than threading a combined count through two independent
+            -- completion callbacks.
+            C_Timer.After(2, function()
+                local added = #GuildLogDB.entries - before
+                if added > 0 then
+                    print(string.format(
+                        "|cff00ccff[GuildLog]|r Manual scan complete -- %d new %s found.",
+                        added, added == 1 and "entry" or "entries"))
+                else
+                    print("|cff00ccff[GuildLog]|r Manual scan complete -- no new entries found.")
+                end
+            end)
         elseif msg == "stats" then
             UpdateAddOnMemoryUsage()
             local memKB = GetAddOnMemoryUsage("GuildLog")
@@ -824,7 +844,7 @@ function GuildLog:OnInitialize()
         end
     end
 
-    print("|cff00ccff[GuildLog]|r Loaded. Type |cffffff00/glog|r to open, |cffffff00/glog stats|r for memory/CPU usage, |cffffff00/glog fixup|r to clean up entries from the roster-scan bug.")
+    print("|cff00ccff[GuildLog]|r Loaded. Type |cffffff00/glog|r to open, |cffffff00/glog scan|r to check for changes now, |cffffff00/glog fixup|r to clean up entries from the roster-scan bug, |cffffff00/glog stats|r for memory/CPU usage.")
 end
 
 function GuildLog:OnEnable()
@@ -832,25 +852,15 @@ function GuildLog:OnEnable()
     self:RegisterEvent("CHAT_MSG_SYSTEM", HandleLiveGuildEvent)
 
     -- Debounce GUILD_EVENT_LOG_UPDATE: WoW fires it multiple times in rapid succession
-    -- on login.  Collapsing the burst ensures a single consistent `now` for the scan.
-    -- loginScanDone gates the one-time login summary message so it only prints once.
+    -- on login. Collapsing the burst ensures a single consistent `now` for the scan.
+    -- Runs silently -- routine scans (startup or periodic) aren't announced to
+    -- chat; /glog scan exists for on-demand, explicit feedback instead.
     local scanTimer = nil
-    local loginScanDone = false
     local function DebouncedScan()
         if scanTimer then scanTimer:Cancel() end
         scanTimer = C_Timer.NewTimer(0.5, function()
             scanTimer = nil
-            local added = ScanGuildLog()
-            if not loginScanDone then
-                loginScanDone = true
-                if added > 0 then
-                    print(string.format(
-                        "|cff00ccff[GuildLog]|r Startup scan complete -- %d new %s since last session.",
-                        added, added == 1 and "event" or "events"))
-                else
-                    print("|cff00ccff[GuildLog]|r Startup scan complete -- no new events.")
-                end
-            end
+            ScanGuildLog()
         end)
     end
     self:RegisterEvent("GUILD_EVENT_LOG_UPDATE", DebouncedScan)
