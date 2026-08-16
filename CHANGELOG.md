@@ -59,8 +59,26 @@ Update on every PR. Add your name to the version header line.
   couldn't recognize them as the same event even after the fixes above.
   The same schema version now also discards `nameIndex` when it changes, so
   it rebuilds from only-ever-confirmed sightings.
-  If your log already picked up one of these bursts, `/glog fixup` cleans
-  it up the same way it handles the other burst patterns.
+- `BuildRosterSnapshot()` computed each member's snapshot key with `MatchKey`
+  while, in the same pass, populating the very index `MatchKey` reads to
+  decide ambiguity (via `ResolveDisplayName`'s side effect for the display
+  name). In a guild with two different members sharing a short name (common
+  in a large cross-realm community guild), whichever one was processed first
+  in the roster didn't see the other's realm registered yet and got keyed by
+  the bare short name; the second one, now seeing the first's realm on
+  record, got keyed by its full name -- so they didn't collide within one
+  scan, but *which* of the two held the short key flipped depending on
+  roster order, producing a spurious leave+join pair for one of them on
+  every subsequent scan. Split into two passes: every member's realm is
+  recorded first, and keys are only computed once the index is fully
+  settled for that scan, so the result no longer depends on iteration
+  order. The schema version was bumped again, since a snapshot built by the
+  single-pass version may already have one member's data silently
+  overwritten by the other's under a shared short key.
+  `/glog fixup` alone couldn't fix this one -- it cleans up symptoms
+  (bursts, mergeable duplicates), but the generator was still producing
+  fresh churn every scan; run it again after this update lands to clean up
+  what already accumulated.
 
 ## [0.6.1] — 2026-08-16 — Katorri
 

@@ -547,13 +547,24 @@ local lastRosterScanTime = 0
 -- ambiguity (trusts the former as-is, falls back to short for the latter) --
 -- so the same player's bare and suffixed mentions stop matching each other,
 -- and /glog fixup's merge pass can't recognize them as the same event.
--- DiscardStaleRosterState() (called from OnInitialize) drops both instead of
--- using them whenever this doesn't match what's saved, so the next scan
--- quietly re-establishes a clean baseline (same as a genuinely first-ever
--- snapshot -- DiffRosterSnapshot's `if not oldSnap` guard logs nothing for
--- it) instead of logging the whole roster as fresh joins, and nameIndex
--- rebuilds from only-ever-confirmed sightings going forward.
-local ROSTER_SNAPSHOT_SCHEMA = 3
+-- A single-pass version of BuildRosterSnapshot computed each member's key
+-- while simultaneously mutating the index another member's key depended on
+-- (see its comment) -- for two members sharing a short name, whichever got
+-- processed first didn't see the other's realm yet, so the two didn't
+-- collide onto one key within that scan, but *which* of them held the short
+-- key flipped depending on roster order, silently overwriting one member's
+-- entry with the other's from scan to scan. A stored snapshot built that way
+-- needs discarding same as an old-scheme one, or the corrected two-pass
+-- version immediately sees it as a mismatch and churns again.
+--
+-- DiscardStaleRosterState() (called from OnInitialize) drops both
+-- rosterSnapshot and nameIndex instead of using them whenever this doesn't
+-- match what's saved, so the next scan quietly re-establishes a clean
+-- baseline (same as a genuinely first-ever snapshot -- DiffRosterSnapshot's
+-- `if not oldSnap` guard logs nothing for it) instead of logging changes
+-- against stale/corrupted data, and nameIndex rebuilds from only-ever-
+-- confirmed sightings going forward.
+local ROSTER_SNAPSHOT_SCHEMA = 4
 
 -- Forces a full re-scan of Blizzard's guild event log from scratch.
 -- Called by the Refresh button, and implicitly after Clear Log.
@@ -571,27 +582,46 @@ end
 -- details just haven't streamed in yet (see ScanRosterForChanges).
 -- Keyed by MatchKey (stable across a session) rather than ResolveDisplayName's
 -- result (can legitimately change mid-session) -- see MatchKey's comment.
+--
+-- Two passes, deliberately: MatchKey's ambiguity check reads nameIndex, and
+-- ResolveDisplayName (called per member below for the display name) writes
+-- to it whenever a member's name is already realm-qualified. Computing keys
+-- in the same pass that populates the index made the result depend on
+-- iteration order -- in a guild with two different members sharing a short
+-- name (e.g. "Heydk-Spirestone" and "Heydk-Skywall"), whichever one got
+-- processed first wouldn't see the other's realm yet and would key by the
+-- bare short name, while the second would see the first's and key by its
+-- full name -- so they wouldn't collide in a single pass, but *which* of
+-- them held the short key flipped from scan to scan depending on roster
+-- order, producing a spurious leave+join pair every time. Recording every
+-- name's realm first, then computing keys once the index is fully settled
+-- for this scan, makes the result independent of iteration order.
 local function BuildRosterSnapshot()
-    local snapshot = {}
-    local resolved = 0
     local count = GetNumGuildMembers()
+    local raw = {}
+    local resolved = 0
     for i = 1, count do
         local name, rankName, rankIndex, level, _, _, note, officerNote = GetGuildRosterInfo(i)
         if name and name ~= "" then
-            local key = MatchKey(name)
-            snapshot[key] = {
-                -- The roster is the strongest signal available for a name's
-                -- real realm -- resolved here for storage/display even though
-                -- the dict key above stays short-and-stable.
-                displayName = ResolveDisplayName(name),
-                rankName    = rankName  or "",
-                rankIndex   = rankIndex or 0,
-                level       = level     or 0,
-                note        = note      or "",
-                officerNote = officerNote or "",
+            RememberDisplayName(name)  -- no-op for a bare name
+            raw[#raw + 1] = {
+                name = name, rankName = rankName, rankIndex = rankIndex,
+                level = level, note = note, officerNote = officerNote,
             }
             resolved = resolved + 1
         end
+    end
+
+    local snapshot = {}
+    for _, r in ipairs(raw) do
+        snapshot[MatchKey(r.name)] = {
+            displayName = ResolveDisplayName(r.name),
+            rankName    = r.rankName  or "",
+            rankIndex   = r.rankIndex or 0,
+            level       = r.level     or 0,
+            note        = r.note      or "",
+            officerNote = r.officerNote or "",
+        }
     end
     return snapshot, resolved, count
 end
