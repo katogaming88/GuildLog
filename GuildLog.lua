@@ -74,12 +74,45 @@ local function ResolveDisplayName(name)
         if count > 1 then return short end  -- genuinely ambiguous -- don't guess
     end
 
+    -- Best-effort display guess for a short name with no confirmed realm on
+    -- record yet -- deliberately NOT remembered via RememberDisplayName(). If
+    -- this guess were persisted as a "seen" sighting and the real (possibly
+    -- different) realm later arrived from a trusted source, the two would
+    -- coexist in the index as false ambiguity, and worse, anything that used
+    -- this resolved value as a stable key (e.g. the roster-snapshot diff)
+    -- would see the key change out from under it and record a spurious
+    -- leave+rejoin for a player who never actually left. Recomputing the
+    -- guess fresh each call keeps it deterministic without that side effect.
     local realm = GetNormalizedRealmName()
     if realm and realm ~= "" then
-        local full = short .. "-" .. realm
-        RememberDisplayName(full)
-        return full
+        return short .. "-" .. realm
     end
+    return short
+end
+
+-- Stable key for matching/comparing two mentions of the same player --
+-- deliberately NOT the same value ResolveDisplayName() returns. That display
+-- name can legitimately change mid-session (a short name's realm goes from
+-- "guessed" to "confirmed" the first time a trusted source hands back the
+-- suffixed form), and anything that compared by the resolved value directly
+-- would see two mentions of the *same* person as different once that
+-- resolution changed -- e.g. Blizzard's event log gets rescanned from
+-- scratch on every login, so an entry logged under a guessed identity last
+-- session can fail to match against this session's now-confirmed identity
+-- and get relogged as new. The short name is stable across all of that
+-- unless it's genuinely ambiguous (2+ confirmed realms on record for it), in
+-- which case only the full name can keep two real players apart.
+local function MatchKey(name)
+    local short = ShortName(name)
+    local set = GuildLogDB and GuildLogDB.nameIndex and GuildLogDB.nameIndex[short]
+    local count = 0
+    if set then
+        for _ in pairs(set) do
+            count = count + 1
+            if count > 1 then break end
+        end
+    end
+    if count > 1 then return ResolveDisplayName(name) end
     return short
 end
 
@@ -140,18 +173,19 @@ local DEDUP_WINDOW = 7200
 -- Returns the matching entry (or nil), so callers can also use it to backfill
 -- a field discovered later -- see the JOIN inviter backfill in ScanGuildLog.
 local function FindDuplicate(ourType, actor, target, approxTime)
-    -- Resolve before comparing, not strip: stored entries already hold their
-    -- resolved (realm-qualified when known) form, so an unresolved incoming
-    -- name has to go through the same resolution to compare like-for-like --
-    -- comparing by short name alone would conflate two different players who
-    -- happen to share one across realms.
-    actor  = ResolveDisplayName(actor)  or ""
-    target = ResolveDisplayName(target) or ""
+    -- Compare by MatchKey, not the stored/resolved value directly -- see
+    -- MatchKey's comment for why: two mentions of the same player can be
+    -- stored under different resolved forms if the realm resolution changed
+    -- between when each was written.
+    local actorKey  = actor  ~= "" and MatchKey(actor)  or ""
+    local targetKey = target ~= "" and MatchKey(target) or ""
     for _, e in ipairs(GuildLogDB.entries) do
         if e.timestamp < approxTime - DEDUP_WINDOW then break end
+        local eActorKey  = e.actor  ~= "" and MatchKey(e.actor)  or ""
+        local eTargetKey = e.target ~= "" and MatchKey(e.target) or ""
         if e.type   == ourType
-           and (e.actor  == actor  or e.actor  == "" or actor  == "")
-           and (e.target == target or e.target == "" or target == "")
+           and (eActorKey  == actorKey  or eActorKey  == "" or actorKey  == "")
+           and (eTargetKey == targetKey or eTargetKey == "" or targetKey == "")
            and math.abs(e.timestamp - approxTime) < DEDUP_WINDOW then
             return e
         end
@@ -245,15 +279,70 @@ end
 
 -- Scan the roster for a joining member's rank (~1 s after join to let roster update).
 local function FindMemberRank(name)
-    local resolvedName = ResolveDisplayName(name)
+    local key = MatchKey(name)
     local count = GetNumGuildMembers()
     for i = 1, count do
         local fullName, rankName = GetGuildRosterInfo(i)
-        if fullName and ResolveDisplayName(fullName) == resolvedName then
+        if fullName and MatchKey(fullName) == key then
             return rankName or ""
         end
     end
     return ""
+end
+
+-- Finds a player's most recently known rank strictly before `beforeTime`, by
+-- scanning their own history: their starting rank from JOIN, or their rank
+-- after their most recent PROMOTE/DEMOTE, whichever is more recent. Backfills
+-- an old rank Blizzard's live chat message / event log never provides (both
+-- only report the *new* rank -- see the PROMOTE/DEMOTE handling below) for
+-- cases the roster-snapshot scan can't cover either: e.g. a brand-new member
+-- (auto-placed at the guild's lowest rank on join) promoted before the next
+-- roster scan ever captured them sitting at that starting rank, so there's no
+-- snapshot-to-snapshot transition to diff against.
+local function FindKnownRankBefore(name, beforeTime)
+    local key = MatchKey(name)
+    for _, e in ipairs(GuildLogDB.entries) do
+        if e.timestamp < beforeTime then
+            if e.type == "JOIN" and e.rank ~= "" and MatchKey(e.actor) == key then
+                return e.rank
+            elseif (e.type == "PROMOTE" or e.type == "DEMOTE")
+               and e.newRank ~= "" and MatchKey(e.target) == key then
+                return e.newRank
+            end
+        end
+    end
+    return ""
+end
+
+-- Last-resort fallback for a rank GuildLog has no history for at all (no
+-- JOIN or prior PROMOTE/DEMOTE on record -- e.g. the player joined before
+-- GuildLog was installed). Blizzard always places a new member at the
+-- guild's lowest configured rank, so that's the best available guess for a
+-- first-ever promotion. Determined from whichever current roster member
+-- sits at the highest rankIndex (lower rank = higher index in Blizzard's
+-- numbering) rather than the guild-control API, since reading the roster
+-- doesn't require any officer/control permissions.
+local function GetLowestGuildRank()
+    local maxIndex, rankName = -1, ""
+    local count = GetNumGuildMembers()
+    for i = 1, count do
+        local _, thisRankName, rankIndex = GetGuildRosterInfo(i)
+        if rankIndex and rankIndex > maxIndex then
+            maxIndex, rankName = rankIndex, thisRankName or ""
+        end
+    end
+    return rankName
+end
+
+-- Best available old rank for a promote/demote Blizzard didn't provide one
+-- for: GuildLog's own history first (precise -- an actual observed rank for
+-- this specific player), falling back to the guild's lowest rank (a guess,
+-- but the correct one for a first-ever promotion) only when there's no
+-- history to draw on at all.
+local function BackfillOldRank(name, beforeTime)
+    local known = FindKnownRankBefore(name, beforeTime)
+    if known ~= "" then return known end
+    return GetLowestGuildRank()
 end
 
 local function HandleLiveGuildEvent(_, message)
@@ -300,14 +389,14 @@ local function HandleLiveGuildEvent(_, message)
         local officer, target, rank = message:match(pat_promote)
         if not officer then return end
         if not IsDuplicate(EVENT_PROMOTE, officer, target, now) then
-            AddEntry(EVENT_PROMOTE, officer, target, "", rank, now)
+            AddEntry(EVENT_PROMOTE, officer, target, BackfillOldRank(target, now), rank, now)
         end
 
     elseif message:find("has demoted", 1, true) then
         local officer, target, rank = message:match(pat_demote)
         if not officer then return end
         if not IsDuplicate(EVENT_DEMOTE, officer, target, now) then
-            AddEntry(EVENT_DEMOTE, officer, target, "", rank, now)
+            AddEntry(EVENT_DEMOTE, officer, target, BackfillOldRank(target, now), rank, now)
         end
     end
 end
@@ -370,7 +459,7 @@ local function ScanGuildLog()
                       or (ourType == EVENT_LEAVE  and (player1 == nil or player1 == ""))
 
             if ourType == EVENT_INVITE and not skip then
-                pendingInviters[ResolveDisplayName(player2)] = player1
+                pendingInviters[MatchKey(player2)] = player1
                 skip = true  -- never logged on its own; folded into the join below
             end
 
@@ -388,7 +477,7 @@ local function ScanGuildLog()
 
                 local invitedBy = ""
                 if ourType == EVENT_JOIN then
-                    local key = ResolveDisplayName(player1)
+                    local key = MatchKey(player1)
                     invitedBy = pendingInviters[key] or ""
                     pendingInviters[key] = nil
                 end
@@ -406,6 +495,7 @@ local function ScanGuildLog()
                     local rank, newRank
                     if ourType == EVENT_PROMOTE or ourType == EVENT_DEMOTE then
                         newRank = rankName
+                        rank = BackfillOldRank(target, approxTime)
                     else
                         rank = rankName
                     end
@@ -442,6 +532,19 @@ end
 local ROSTER_SCAN_MIN_INTERVAL = 30  -- seconds between full roster diffs
 local lastRosterScanTime = 0
 
+-- Bump whenever the snapshot's dict-key scheme changes (see MatchKey/
+-- BuildRosterSnapshot). GuildLogDB.rosterSnapshot persists across sessions,
+-- so a stored snapshot keyed under an old scheme would look completely
+-- unrecognizable to a diff using the new one -- every current member's new
+-- key is missing from the old snapshot and vice versa, which reads as the
+-- entire guild leaving and rejoining at once. DiscardStaleRosterSnapshot()
+-- (called from OnInitialize) drops the stored snapshot instead of diffing
+-- against it whenever this doesn't match what's saved, so the next scan
+-- quietly re-establishes a baseline (same as a genuinely first-ever
+-- snapshot -- DiffRosterSnapshot's `if not oldSnap` guard logs nothing for
+-- it) instead of logging the whole roster as fresh joins.
+local ROSTER_SNAPSHOT_SCHEMA = 2
+
 -- Forces a full re-scan of Blizzard's guild event log from scratch.
 -- Called by the Refresh button, and implicitly after Clear Log.
 -- Resets the watermark so ScanGuildLog processes all 20 events on the next
@@ -456,6 +559,8 @@ end
 -- Returns the snapshot plus how many roster slots Blizzard reports total, so
 -- callers can tell a genuinely small guild apart from a big one whose member
 -- details just haven't streamed in yet (see ScanRosterForChanges).
+-- Keyed by MatchKey (stable across a session) rather than ResolveDisplayName's
+-- result (can legitimately change mid-session) -- see MatchKey's comment.
 local function BuildRosterSnapshot()
     local snapshot = {}
     local resolved = 0
@@ -463,12 +568,12 @@ local function BuildRosterSnapshot()
     for i = 1, count do
         local name, rankName, rankIndex, level, _, _, note, officerNote = GetGuildRosterInfo(i)
         if name and name ~= "" then
-            -- The roster is the strongest signal available for a name's real
-            -- realm -- resolving here (not just short-keying) means two
-            -- different players who share a short name across realms get
-            -- distinct snapshot entries instead of colliding into one.
-            name = ResolveDisplayName(name)
-            snapshot[name] = {
+            local key = MatchKey(name)
+            snapshot[key] = {
+                -- The roster is the strongest signal available for a name's
+                -- real realm -- resolved here for storage/display even though
+                -- the dict key above stays short-and-stable.
+                displayName = ResolveDisplayName(name),
                 rankName    = rankName  or "",
                 rankIndex   = rankIndex or 0,
                 level       = level     or 0,
@@ -485,8 +590,9 @@ local function DiffRosterSnapshot(oldSnap, newSnap)
     if not oldSnap then return end  -- first-ever snapshot: nothing to compare against
     local now = time()
 
-    for name, new in pairs(newSnap) do
-        local old = oldSnap[name]
+    for key, new in pairs(newSnap) do
+        local old = oldSnap[key]
+        local name = new.displayName
         if not old then
             if not IsDuplicate(EVENT_JOIN, name, "", now) then
                 AddEntry(EVENT_JOIN, name, "", new.rankName, "", now)
@@ -521,8 +627,9 @@ local function DiffRosterSnapshot(oldSnap, newSnap)
         end
     end
 
-    for name in pairs(oldSnap) do
-        if not newSnap[name] then
+    for key, old in pairs(oldSnap) do
+        if not newSnap[key] then
+            local name = old.displayName
             if not IsDuplicate(EVENT_LEAVE, name, "", now) then
                 AddEntry(EVENT_LEAVE, name, "", "", "", now)
             end
@@ -657,6 +764,15 @@ local function MergeStoredInvites()
     end
 end
 
+-- One-time-per-load migration: see ROSTER_SNAPSHOT_SCHEMA's comment. Safe to
+-- run every load -- a no-op once GuildLogDB.rosterSnapshotSchema matches.
+local function DiscardStaleRosterSnapshot()
+    if GuildLogDB.rosterSnapshotSchema ~= ROSTER_SNAPSHOT_SCHEMA then
+        GuildLogDB.rosterSnapshot = nil
+        GuildLogDB.rosterSnapshotSchema = ROSTER_SNAPSHOT_SCHEMA
+    end
+end
+
 -- == Roster-scan corruption recovery =========================================
 -- Recovery for logs corrupted by the two roster-snapshot-scan bugs above: a
 -- partial snapshot diffed mid-load could snowball into repeated storms of
@@ -707,12 +823,20 @@ local function MergePhantomDuplicates()
         local e = entries[i]
         local dupIdx = nil
         if MERGEABLE_TYPES[e.type] then
+            -- Compare by MatchKey, not the stored value directly: two entries
+            -- for the same player can hold different resolved forms if their
+            -- realm resolution changed between when each was written (see
+            -- MatchKey's comment).
+            local eActorKey  = e.actor  ~= "" and MatchKey(e.actor)  or ""
+            local eTargetKey = e.target ~= "" and MatchKey(e.target) or ""
             for j = i + 1, #entries do
                 local o = entries[j]
                 if e.timestamp - o.timestamp > DEDUP_WINDOW then break end
+                local oActorKey  = o.actor  ~= "" and MatchKey(o.actor)  or ""
+                local oTargetKey = o.target ~= "" and MatchKey(o.target) or ""
                 if o.type == e.type
-                   and (o.actor  == e.actor  or o.actor  == "" or e.actor  == "")
-                   and (o.target == e.target or o.target == "" or e.target == "") then
+                   and (oActorKey  == eActorKey  or oActorKey  == "" or eActorKey  == "")
+                   and (oTargetKey == eTargetKey or oTargetKey == "" or eTargetKey == "") then
                     dupIdx = j
                     break
                 end
@@ -790,6 +914,7 @@ function GuildLog:OnInitialize()
     GuildLogDB.entries = GuildLogDB.entries or {}
     PurgeExistingDuplicates()
     MergeStoredInvites()
+    DiscardStaleRosterSnapshot()
 
     self:RegisterComm(COMM_PREFIX)
 

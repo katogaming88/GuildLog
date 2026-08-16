@@ -8,6 +8,49 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.6.2] — 2026-08-16 — Katorri
+
+### Fixed
+- Realm-suffix resolution could still produce duplicate/split identities
+  despite 0.6.1's fix. The root cause was subtler: `ResolveDisplayName()`'s
+  result for a given short name can legitimately change mid-session (a
+  guessed own-realm placeholder gets upgraded to a confirmed realm the first
+  time a trusted source hands back the suffixed form), but that resolved
+  value was still being used directly for matching/comparison in several
+  places -- the roster-snapshot diff's dict key, `FindDuplicate`,
+  `FindMemberRank`, the invite/join pairing in `ScanGuildLog`, and the
+  duplicate-merge pass in `/glog fixup`. Any of those comparisons could see
+  the *same* player as two different people the moment their resolution
+  changed -- e.g. Blizzard's event log gets rescanned from scratch on every
+  login, so an entry logged under a guessed identity last session could fail
+  to match this session's now-confirmed identity and get relogged as new.
+  All of those now compare through a new `MatchKey()` -- the short name,
+  unless it's genuinely ambiguous (2+ confirmed realms on record for it) --
+  which stays stable regardless of how the display resolution evolves.
+  `ResolveDisplayName()`'s own-realm guess also no longer gets persisted as
+  a confirmed sighting, since a wrong guess colliding with the real realm
+  later would have created false ambiguity.
+- Promotions/demotions could still show "?" for the old rank in cases the
+  0.6.1 backfill didn't cover: a brand-new member (auto-placed at the
+  guild's lowest rank on join) promoted before the next roster scan ever
+  captured them sitting at that starting rank has no snapshot-to-snapshot
+  transition to diff, so there was nothing to backfill from. The old rank is
+  now looked up from the player's own history first (their starting rank
+  from JOIN, or their rank after their most recent PROMOTE/DEMOTE) and,
+  failing that, falls back to the guild's actual lowest configured rank --
+  Blizzard always places new members there, so it's the correct guess for a
+  first-ever promotion with no other history to draw on.
+- Deploying the `MatchKey()` fix above one-time-corrupted every existing
+  installation's log: `GuildLogDB.rosterSnapshot` persists across sessions,
+  and a snapshot saved under the old dict-key scheme reads as completely
+  unrecognizable to a diff using the new one, which looks exactly like the
+  entire guild leaving and rejoining at once. A schema version now gates the
+  stored snapshot; a mismatch discards it instead of diffing against it, so
+  the next scan quietly re-establishes a baseline (same as a genuinely
+  first-ever snapshot) instead of logging the whole roster as fresh joins.
+  If your log already picked up one of these bursts, `/glog fixup` cleans
+  it up the same way it handles the other burst patterns.
+
 ## [0.6.1] — 2026-08-16 — Katorri
 
 ### Changed
