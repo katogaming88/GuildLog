@@ -8,6 +8,16 @@ Update on every PR. Add your name to the version header line.
 
 ---
 
+## [0.6.0] — 2026-08-16 — Katorri
+
+### Added
+- The log window can now be resized by dragging its bottom-right corner grip,
+  and the Time/Event/Player columns can be individually resized by dragging
+  the dividers between their headers (the Details column always absorbs
+  whatever space is left). Both window size and column widths persist across
+  sessions. The row list grows or shrinks to fit however tall the window is,
+  up to 60 visible rows.
+
 ## [0.5.0] — 2026-08-06 — Katorri
 
 ### Changed

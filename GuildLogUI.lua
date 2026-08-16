@@ -10,17 +10,28 @@ GuildLogUI = UI
 
 local WINDOW_W   = 830
 local WINDOW_H   = 610
+local WINDOW_MIN_W = 620
+local WINDOW_MIN_H = 340
+local WINDOW_MAX_W = 1600
+local WINDOW_MAX_H = 1200
 local TITLE_H    = 30
 local FILTER_H   = 26
 local BTN_H      = 24
 local ROW_H      = 24
 local VISIBLE    = 18    -- display-line slots visible at once (an entry with
-                          -- two lines -- see BuildDisplayLines -- uses two of these)
+                          -- two lines -- see BuildDisplayLines -- uses two of these);
+                          -- mutable -- EnsureRowCapacity grows/shrinks it to fit the
+                          -- window's current height (see below)
+local MAX_VISIBLE = 60   -- hard cap on row frames, however tall the window gets
 local PAD        = 10
 
-local COL_TIME_W   = 145
-local COL_TYPE_W   = 110
-local COL_PLAYER_W = 132
+-- Column widths default here but are mutable and persisted (GuildLogDB.ui.columns)
+-- once the user drags a column divider -- see RestoreColumns/SaveColumns.
+local DEFAULT_COL_TIME_W   = 145
+local DEFAULT_COL_TYPE_W   = 110
+local DEFAULT_COL_PLAYER_W = 132
+local COL_MIN_W = 50
+local colTimeW, colTypeW, colPlayerW = DEFAULT_COL_TIME_W, DEFAULT_COL_TYPE_W, DEFAULT_COL_PLAYER_W
 
 -- Theme -- dark panels with a gold/bronze accent, consistent across the
 -- window chrome, list panel, and buttons instead of mixing custom dark
@@ -378,6 +389,40 @@ local function SavePosition()
     GuildLogDB.ui.pos = { point = point, relPoint = relPoint, x = x, y = y }
 end
 
+-- == Size persistence ==========================================================
+-- GuildLogDB.ui.width/height predate the custom-frame rewrite (an older
+-- AceGUI-backed version saved size through its own status table using those
+-- same field names) -- reused here rather than introducing new fields.
+
+local function RestoreSize()
+    local ui = GuildLogDB.ui
+    local w = (ui and ui.width)  or WINDOW_W
+    local h = (ui and ui.height) or WINDOW_H
+    w = math.max(WINDOW_MIN_W, math.min(WINDOW_MAX_W, w))
+    h = math.max(WINDOW_MIN_H, math.min(WINDOW_MAX_H, h))
+    mainFrame:SetSize(w, h)
+end
+
+local function SaveSize()
+    GuildLogDB.ui = GuildLogDB.ui or {}
+    GuildLogDB.ui.width  = mainFrame:GetWidth()
+    GuildLogDB.ui.height = mainFrame:GetHeight()
+end
+
+-- == Column width persistence ==================================================
+
+local function RestoreColumns()
+    local cols = GuildLogDB.ui and GuildLogDB.ui.columns
+    colTimeW   = (cols and cols.time)   or DEFAULT_COL_TIME_W
+    colTypeW   = (cols and cols.type)   or DEFAULT_COL_TYPE_W
+    colPlayerW = (cols and cols.player) or DEFAULT_COL_PLAYER_W
+end
+
+local function SaveColumns()
+    GuildLogDB.ui = GuildLogDB.ui or {}
+    GuildLogDB.ui.columns = { time = colTimeW, type = colTypeW, player = colPlayerW }
+end
+
 -- == Main frame construction ====================================================
 
 local function BuildUI()
@@ -386,14 +431,17 @@ local function BuildUI()
     GuildLogDB.ui = GuildLogDB.ui or {}
 
     mainFrame = CreateFrame("Frame", "GuildLogMainFrame", UIParent, "BackdropTemplate")
-    mainFrame:SetSize(WINDOW_W, WINDOW_H)
     mainFrame:SetFrameStrata("HIGH")
     mainFrame:SetClampedToScreen(true)
     mainFrame:SetMovable(true)
+    mainFrame:SetResizable(true)
+    mainFrame:SetResizeBounds(WINDOW_MIN_W, WINDOW_MIN_H, WINDOW_MAX_W, WINDOW_MAX_H)
     mainFrame:SetBackdrop(SolidBackdrop())
     mainFrame:SetBackdropColor(0.04, 0.04, 0.05, 0.97)
     mainFrame:SetBackdropBorderColor(THEME_BORDER[1], THEME_BORDER[2], THEME_BORDER[3], 0.9)
     RestorePosition()
+    RestoreSize()
+    RestoreColumns()
     mainFrame:Hide()
 
     local content = mainFrame
@@ -474,24 +522,27 @@ local function BuildUI()
     listPanel:SetBackdropColor(0, 0, 0, 0.55)
     listPanel:SetBackdropBorderColor(THEME_BORDER[1], THEME_BORDER[2], THEME_BORDER[3], 0.6)
 
-    -- Column headers
-    local function AddHeader(text, x, w)
+    -- Column headers -- each anchored to the previous one's right edge (like
+    -- the row text below) so resizing a column only ever needs a SetWidth
+    -- call; the anchor chain handles repositioning everything after it.
+    local function AddHeader(text, anchorTo, w)
         local fs = listPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        fs:SetPoint("TOPLEFT", listPanel, "TOPLEFT", x, -5)
+        if anchorTo then
+            fs:SetPoint("LEFT", anchorTo, "RIGHT", 6, 0)
+        else
+            fs:SetPoint("TOPLEFT", listPanel, "TOPLEFT", 10, -5)
+        end
         fs:SetWidth(w)
         fs:SetJustifyH("LEFT")
         fs:SetText(text)
         fs:SetTextColor(THEME_GOLD[1]*0.8, THEME_GOLD[2]*0.75, THEME_GOLD[3]*0.65)
         return fs
     end
-    local colTimeX   = 10
-    local colTypeX   = colTimeX + COL_TIME_W + 6
-    local colPlayerX = colTypeX + COL_TYPE_W + 6
-    local colDetailX = colPlayerX + COL_PLAYER_W + 6
-    AddHeader("Time",    colTimeX,   COL_TIME_W)
-    AddHeader("Event",   colTypeX,   COL_TYPE_W)
-    AddHeader("Player",  colPlayerX, COL_PLAYER_W)
-    AddHeader("Details", colDetailX, 200)
+    local headerTime   = AddHeader("Time",    nil,        colTimeW)
+    local headerType   = AddHeader("Event",   headerTime, colTypeW)
+    local headerPlayer = AddHeader("Player",  headerType, colPlayerW)
+    AddHeader("Details", headerPlayer, 200)  -- fills remaining space; no resizer needed
+    headerTime:SetPoint("TOPLEFT", listPanel, "TOPLEFT", 10, -5)  -- pin the chain's start
 
     local headerDivider = listPanel:CreateTexture(nil, "ARTWORK")
     headerDivider:SetHeight(1)
@@ -501,7 +552,10 @@ local function BuildUI()
 
     local rowsTop = -26  -- below the column header row, relative to listPanel
 
-    for i = 1, VISIBLE do
+    -- Creates one row frame at slot i, anchored purely by index -- called both
+    -- for the initial VISIBLE rows and later by EnsureRowCapacity as the
+    -- window grows tall enough to fit more.
+    local function CreateRow(i)
         local row = CreateFrame("Frame", nil, listPanel)
         row:SetHeight(ROW_H)
         row:SetPoint("TOPLEFT",  listPanel, "TOPLEFT",  2, rowsTop - (i-1)*ROW_H)
@@ -525,19 +579,19 @@ local function BuildUI()
 
         row.timeText = row:CreateFontString(nil, "OVERLAY", "GameFontDisable")
         row.timeText:SetPoint("LEFT", row, "LEFT", 8, 0)
-        row.timeText:SetWidth(COL_TIME_W)
+        row.timeText:SetWidth(colTimeW)
         row.timeText:SetJustifyH("LEFT")
         row.timeText:SetWordWrap(false)
 
         row.typeText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         row.typeText:SetPoint("LEFT", row.timeText, "RIGHT", 6, 0)
-        row.typeText:SetWidth(COL_TYPE_W)
+        row.typeText:SetWidth(colTypeW)
         row.typeText:SetJustifyH("LEFT")
         row.typeText:SetWordWrap(false)
 
         row.playerText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         row.playerText:SetPoint("LEFT", row.typeText, "RIGHT", 6, 0)
-        row.playerText:SetWidth(COL_PLAYER_W)
+        row.playerText:SetWidth(colPlayerW)
         row.playerText:SetJustifyH("LEFT")
         row.playerText:SetWordWrap(false)
 
@@ -547,7 +601,87 @@ local function BuildUI()
         row.detailsText:SetJustifyH("LEFT")
         row.detailsText:SetWordWrap(false)
 
-        rowFrames[i] = row
+        return row
+    end
+
+    for i = 1, VISIBLE do
+        rowFrames[i] = CreateRow(i)
+    end
+
+    -- Applies the current colTimeW/colTypeW/colPlayerW to every header and
+    -- row -- each element's anchor is relative to the previous one's right
+    -- edge, so a width change alone repositions everything after it.
+    local function RelayoutColumns()
+        headerTime:SetWidth(colTimeW)
+        headerType:SetWidth(colTypeW)
+        headerPlayer:SetWidth(colPlayerW)
+        for _, row in ipairs(rowFrames) do
+            row.timeText:SetWidth(colTimeW)
+            row.typeText:SetWidth(colTypeW)
+            row.playerText:SetWidth(colPlayerW)
+        end
+    end
+
+    -- Thin draggable divider between two columns. getW/setW read and write
+    -- the column immediately to the divider's left; dragging right widens
+    -- that column, dragging left narrows it, and the Details column (which
+    -- has no divider of its own) simply absorbs whatever space is left.
+    local function CreateColumnResizer(anchorTo, getW, setW)
+        local handle = CreateFrame("Frame", nil, listPanel)
+        handle:SetWidth(8)
+        handle:SetPoint("TOP",    anchorTo, "TOPRIGHT", 3, 0)
+        handle:SetPoint("BOTTOM", listPanel, "BOTTOM", 0, 0)
+        handle:EnableMouse(true)
+
+        local line = handle:CreateTexture(nil, "OVERLAY")
+        line:SetWidth(1)
+        line:SetPoint("TOP", handle, "TOP", 0, 0)
+        line:SetPoint("BOTTOM", handle, "BOTTOM", 0, 0)
+        line:SetColorTexture(THEME_GOLD[1], THEME_GOLD[2], THEME_GOLD[3], 0.25)
+
+        handle:SetScript("OnEnter", function() line:SetAlpha(1.0) end)
+        handle:SetScript("OnLeave", function() if not handle.dragging then line:SetAlpha(0.25) end end)
+
+        handle:SetScript("OnMouseDown", function(self)
+            self.dragging   = true
+            self.startX     = GetCursorPosition()
+            self.startWidth = getW()
+            line:SetAlpha(1.0)
+        end)
+        handle:SetScript("OnMouseUp", function(self)
+            self.dragging = false
+            line:SetAlpha(0.25)
+            SaveColumns()
+        end)
+        handle:SetScript("OnUpdate", function(self)
+            if not self.dragging then return end
+            local scale = listPanel:GetEffectiveScale()
+            local delta = (GetCursorPosition() - self.startX) / scale
+            setW(math.max(COL_MIN_W, self.startWidth + delta))
+            RelayoutColumns()
+        end)
+
+        return handle
+    end
+
+    CreateColumnResizer(headerTime,   function() return colTimeW   end, function(w) colTimeW   = w end)
+    CreateColumnResizer(headerType,   function() return colTypeW   end, function(w) colTypeW   = w end)
+    CreateColumnResizer(headerPlayer, function() return colPlayerW end, function(w) colPlayerW = w end)
+
+    -- Grows (never shrinks the frame count, just hides the excess) the row
+    -- pool to fit however tall listPanel currently is, up to MAX_VISIBLE.
+    local function EnsureRowCapacity()
+        local available = listPanel:GetHeight() + rowsTop  -- rowsTop is negative
+        local newVisible = math.max(1, math.min(MAX_VISIBLE, math.floor(available / ROW_H)))
+        if newVisible > #rowFrames then
+            for i = #rowFrames + 1, newVisible do
+                rowFrames[i] = CreateRow(i)
+            end
+        end
+        VISIBLE = newVisible
+        for i = VISIBLE + 1, #rowFrames do
+            rowFrames[i]:Hide()
+        end
     end
 
     -- -- Scrollbar -- themed track + pill thumb instead of the stock Blizzard
@@ -618,7 +752,28 @@ local function BuildUI()
     end)
 
     statusText = content:CreateFontString(nil, "OVERLAY", "GameFontDisable")
-    statusText:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -PAD - 4, PAD + 6)
+    statusText:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -PAD - 20, PAD + 6)
+
+    -- -- Resize grip -- drag to resize the whole window. --
+    local resizeGrip = CreateFrame("Button", nil, content)
+    resizeGrip:SetSize(16, 16)
+    resizeGrip:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -3, 3)
+    resizeGrip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    resizeGrip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    resizeGrip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    resizeGrip:SetScript("OnMouseDown", function()
+        mainFrame:StartSizing("BOTTOMRIGHT")
+    end)
+    resizeGrip:SetScript("OnMouseUp", function()
+        mainFrame:StopMovingOrSizing()
+        SaveSize()
+    end)
+
+    mainFrame:SetScript("OnSizeChanged", function()
+        EnsureRowCapacity()
+        UI.RefreshRows()
+    end)
+    EnsureRowCapacity()
 
     -- Register with UISpecialFrames so Escape closes the window.
     -- CreateFrame's name argument already registers GuildLogMainFrame globally.
